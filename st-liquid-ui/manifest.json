@@ -1,0 +1,17 @@
+{
+  "name": "st-liquid-ui",
+  "display_name": "Liquid UI",
+  "loading_order": 10,
+  "requires": [],
+  "optional": [],
+  "version": "2.0.0",
+  "description": "Physics-driven motion system: liquid text reveal, tactile press, hierarchical depth, spring animations & adaptive performance for SillyTavern.",
+  "author": "Faxrd9",
+  "js": [
+    "index.js"
+  ],
+  "css": [
+    "style.css"
+  ],
+  "entryPoint": "index.js"
+}
