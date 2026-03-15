@@ -1,34 +1,47 @@
 :root {
-    /* Main App-like non-bouncy curve (very smooth deceleration) */
+    /* 全局贝塞尔曲线 - Apple/Fluid 风格 */
     --liquid-appear: cubic-bezier(0.2, 0.8, 0.2, 1);
+    /* 入场：平滑显现 */
     --liquid-dismiss: cubic-bezier(0.4, 0, 1, 1);
-
-    /* Removed the bounce, now a rapid start and smooth glide to end */
+    /* 退场：快速消失 */
     --liquid-spring: cubic-bezier(0.16, 1, 0.3, 1);
+    /* 弹性：弹簧回弹 */
     --liquid-press: cubic-bezier(0.2, 0, 0.7, 0.1);
+    /* 按压：快速响应 */
     --liquid-panel: cubic-bezier(0.16, 1, 0.3, 1);
+    /* 面板：平滑展开 */
+    --liquid-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+    /* 弹跳：过度回弹 */
+    --liquid-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+    /* 平滑：标准过渡 */
+    --liquid-snap: cubic-bezier(0.25, 0.1, 0.25, 1);
+    /* 快速：干脆利落 */
 
-    --liquid-glow-a: rgba(87, 153, 255, 0.15);
-    --liquid-glow-b: rgba(165, 110, 255, 0.12);
-    --liquid-accent: rgba(87, 153, 255, 0.5);
-    --liquid-glow-strong: rgba(87, 153, 255, 0.32);
-    --liquid-shine: rgba(255, 255, 255, 0.08);
+    /* 全局动画时长 */
+    --liquid-duration-fast: 150ms;
+    --liquid-duration-normal: 280ms;
+    --liquid-duration-slow: 420ms;
+    --liquid-duration-modal: 350ms;
 
-    /* Optimized simplified shadows for performance */
-    --liquid-shadow-bubble: 0 1px 3px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
-    --liquid-shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.15);
-    --liquid-shadow-float: 0 8px 24px rgba(0, 0, 0, 0.2);
-    --liquid-shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.3);
-
-    --liquid-blur-progress: 0;
+    /* 弹动反馈设置变量 */
+    --liquid-press-scale: 0.985;
+    --liquid-press-duration: 100ms;
 }
 
+/* 文字逐字显示动画 - 外层保持位置，内层做动画 */
 html.liquid-ui-enabled .liquid-char-reveal {
     display: inline;
-    animation: liquid-smoke 0.48s var(--liquid-appear) both;
+    /* 外层保持原始位置，不使用 transform */
 }
 
-@keyframes liquid-smoke {
+html.liquid-ui-enabled .liquid-char-inner {
+    display: inline;
+    animation: liquid-smoke-transform 0.48s var(--liquid-appear) both;
+    pointer-events: none;
+    /* 内层负责视觉动画，但不阻挡点击事件 */
+}
+
+@keyframes liquid-smoke-transform {
     0% {
         opacity: 0;
         transform: translateY(6px) scale(0.97) translateZ(0);
@@ -45,24 +58,19 @@ html.liquid-ui-enabled .liquid-char-reveal {
     }
 }
 
+/* 聊天区域过渡 */
 html.liquid-ui-enabled #chat {
-    transition: transform 350ms var(--liquid-panel), filter 350ms var(--liquid-appear);
+    transition: transform 350ms var(--liquid-panel);
     transform-origin: center;
-    will-change: transform, filter;
     overscroll-behavior: none;
-    box-shadow: none;
 }
 
-html.liquid-ui-enabled .liquid-streaming-active .mes_text {
-    contain: layout style;
-}
-
+/* 流式输出光标 */
 html.liquid-ui-enabled #chat .mes_text.liquid-cursor::after {
     content: '\25cb';
     display: inline-block;
     margin-left: 0.15em;
     vertical-align: -0.05em;
-    color: var(--liquid-accent);
     animation: liquid-pulse 1.4s var(--liquid-appear) infinite;
 }
 
@@ -80,41 +88,7 @@ html.liquid-ui-enabled #chat .mes_text.liquid-cursor::after {
     }
 }
 
-html.liquid-ui-enabled #chat .mes.liquid-streaming {
-    position: relative;
-    border-radius: 8px;
-}
-
-html.liquid-ui-enabled #chat .mes.liquid-streaming::before {
-    content: '';
-    position: absolute;
-    inset: -2px;
-    border-radius: inherit;
-    pointer-events: none;
-    background: linear-gradient(135deg, var(--liquid-glow-a), var(--liquid-glow-b), transparent 60%);
-    background-size: 300% 300%;
-    opacity: 0.4;
-    z-index: -1;
-    animation: liquid-aurora 5.5s var(--liquid-appear) infinite;
-}
-
-@keyframes liquid-aurora {
-    0% {
-        background-position: 0% 50%;
-        opacity: 0.25;
-    }
-
-    50% {
-        background-position: 100% 50%;
-        opacity: 0.5;
-    }
-
-    100% {
-        background-position: 0% 50%;
-        opacity: 0.25;
-    }
-}
-
+/* 按钮交互动画 */
 html.liquid-ui-enabled .liquid-pressable,
 html.liquid-ui-enabled button,
 html.liquid-ui-enabled .menu_button,
@@ -124,7 +98,7 @@ html.liquid-ui-enabled .interactable,
 html.liquid-ui-enabled .recentChat,
 html.liquid-ui-enabled [role="button"],
 html.liquid-ui-enabled .header-button {
-    transition: transform 220ms var(--liquid-spring), filter 220ms var(--liquid-appear) !important;
+    transition: transform var(--liquid-duration-fast) var(--liquid-spring) !important;
     transform-origin: center center;
 }
 
@@ -135,16 +109,82 @@ html.liquid-ui-enabled .interactable:hover,
 html.liquid-ui-enabled .recentChat:hover,
 html.liquid-ui-enabled [role="button"]:hover,
 html.liquid-ui-enabled .header-button:hover {
-    filter: brightness(1.1);
-    transform: translateY(-1px) scale(1.01) translateZ(0);
+    filter: brightness(1.05);
+    transition: filter 0.2s ease !important;
 }
 
-html.liquid-ui-enabled .liquid-pressed {
-    transform: scale(0.975) translateZ(0) !important;
-    filter: brightness(0.88) !important;
-    transition: transform 80ms var(--liquid-press), filter 80ms var(--liquid-press) !important;
+html.liquid-ui-enabled .liquid-pressed,
+html.liquid-ui-enabled button:active,
+html.liquid-ui-enabled .menu_button:active,
+html.liquid-ui-enabled .interactable:active,
+html.liquid-ui-enabled [role="button"]:active {
+    transform: scale(var(--liquid-press-scale)) translateZ(0) !important;
+    transition: transform var(--liquid-press-duration) var(--liquid-press) !important;
 }
 
+/* 弹动反馈禁用 - 全局禁用 */
+html.liquid-ui-enabled.liquid-press-disabled .liquid-pressable,
+html.liquid-ui-enabled.liquid-press-disabled button,
+html.liquid-ui-enabled.liquid-press-disabled .menu_button,
+html.liquid-ui-enabled.liquid-press-disabled .right_menu_button,
+html.liquid-ui-enabled.liquid-press-disabled .list-group-item,
+html.liquid-ui-enabled.liquid-press-disabled .interactable,
+html.liquid-ui-enabled.liquid-press-disabled .recentChat,
+html.liquid-ui-enabled.liquid-press-disabled [role="button"],
+html.liquid-ui-enabled.liquid-press-disabled .header-button,
+html.liquid-ui-enabled.liquid-press-disabled .character_select,
+html.liquid-ui-enabled.liquid-press-disabled .char_item,
+html.liquid-ui-enabled.liquid-press-disabled .char-grid-item,
+html.liquid-ui-enabled.liquid-press-disabled .character-grid-item,
+html.liquid-ui-enabled.liquid-press-disabled [data-character-id],
+html.liquid-ui-enabled.liquid-press-disabled .chat-card,
+html.liquid-ui-enabled.liquid-press-disabled .story-card,
+html.liquid-ui-enabled.liquid-press-disabled .scenario-card {
+    transition: none !important;
+}
+
+html.liquid-ui-enabled.liquid-press-disabled .liquid-pressed,
+html.liquid-ui-enabled.liquid-press-disabled button:active,
+html.liquid-ui-enabled.liquid-press-disabled .menu_button:active,
+html.liquid-ui-enabled.liquid-press-disabled .right_menu_button:active,
+html.liquid-ui-enabled.liquid-press-disabled .list-group-item:active,
+html.liquid-ui-enabled.liquid-press-disabled .interactable:active,
+html.liquid-ui-enabled.liquid-press-disabled .recentChat:active,
+html.liquid-ui-enabled.liquid-press-disabled [role="button"]:active,
+html.liquid-ui-enabled.liquid-press-disabled .header-button:active,
+html.liquid-ui-enabled.liquid-press-disabled .character_select:active,
+html.liquid-ui-enabled.liquid-press-disabled .char_item:active,
+html.liquid-ui-enabled.liquid-press-disabled .char-grid-item:active,
+html.liquid-ui-enabled.liquid-press-disabled .character-grid-item:active,
+html.liquid-ui-enabled.liquid-press-disabled [data-character-id]:active,
+html.liquid-ui-enabled.liquid-press-disabled .chat-card:active,
+html.liquid-ui-enabled.liquid-press-disabled .story-card:active,
+html.liquid-ui-enabled.liquid-press-disabled .scenario-card:active {
+    transform: none !important;
+}
+
+/* 聊天文字弹动禁用 - 仅对聊天消息禁用 */
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes,
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes_text,
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes .mes_header,
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes .mes_block {
+    transition: none !important;
+}
+
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes:active,
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes_text:active,
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes .mes_header:active,
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes .mes_block:active {
+    transform: none !important;
+}
+
+/* 聊天文字 hover 也禁用 */
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes:hover,
+html.liquid-ui-enabled.liquid-chat-text-press-disabled #chat .mes_text:hover {
+    transform: none !important;
+}
+
+/* 下拉菜单动画 */
 html.liquid-ui-enabled .options-content {
     animation: liquid-menu-reveal 350ms var(--liquid-spring) both;
 }
@@ -163,54 +203,54 @@ html.liquid-ui-enabled .options-content {
     }
 }
 
-/* Chat mes baseline modifiers removed to prevent shadow overlay bugs on custom themes */
-
-html.liquid-ui-enabled #chat .mes.liquid-mes-new {
-    position: relative;
-    z-index: 0;
+/* 弹窗入场动画 */
+html.liquid-ui-enabled .liquid-popup-entrance {
+    animation: liquid-modal-in 0.3s var(--liquid-appear) both !important;
+    transform-origin: center;
 }
 
-html.liquid-ui-enabled #chat .mes.liquid-mes-new::after {
-    content: '';
-    position: absolute;
-    inset: -3px;
-    border-radius: inherit;
-    pointer-events: none;
-    background: radial-gradient(circle at 20% 10%, rgba(87, 153, 255, 0.35), rgba(165, 110, 255, 0.2) 45%, transparent 70%);
-    opacity: 0;
-    transform: scale(0.98);
-    mix-blend-mode: screen;
-    animation: liquid-new-flash 1.1s var(--liquid-appear) both;
-    z-index: 1;
+@keyframes liquid-modal-in {
+    0% {
+        opacity: 0;
+        transform: scale(0.92) translateY(10px) translateZ(0);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0) translateZ(0);
+    }
 }
 
-html.liquid-ui-enabled .liquid-popup-entrance,
-html.liquid-ui-enabled .popup,
-html.liquid-ui-enabled .wide_dialogue_popup,
-html.liquid-ui-enabled #dialogue_popup,
-html.liquid-ui-enabled .ui-dialog,
-html.liquid-ui-enabled .modal {
-    box-shadow: var(--liquid-shadow-overlay) !important;
-    contain: layout style;
+/* 消息入场动画 */
+html.liquid-ui-enabled #chat .apple-entrance {
+    animation: liquid-mes-in 0.45s var(--liquid-bounce) both;
+    will-change: transform, opacity;
 }
 
+@keyframes liquid-mes-in {
+    0% {
+        opacity: 0;
+        transform: translateY(15px) scale(0.98) translateZ(0);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1) translateZ(0);
+    }
+}
+
+/* 侧边栏动画 */
 html.liquid-ui-enabled .liquid-side-panel {
     position: fixed;
     top: 0;
     bottom: 0;
     z-index: 1000;
-    background: rgba(26, 26, 26, 0.78);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    backdrop-filter: blur(24px) saturate(180%);
-    color: #e0e0e0;
-    will-change: transform;
-    box-shadow: var(--liquid-shadow-float);
-    contain: layout;
-}
-
-html.liquid-ui-enabled .liquid-popup-entrance {
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-    backdrop-filter: blur(16px) saturate(180%);
+    will-change: transform, opacity;
+    opacity: 0;
+    visibility: hidden;
+    transition: transform var(--liquid-duration-normal) var(--liquid-dismiss),
+        opacity var(--liquid-duration-normal) var(--liquid-dismiss),
+        visibility var(--liquid-duration-normal) var(--liquid-dismiss);
 }
 
 html.liquid-ui-enabled .liquid-side-panel.liquid-left {
@@ -225,18 +265,21 @@ html.liquid-ui-enabled .liquid-side-panel.liquid-right {
     transform: translateX(100%) translateZ(0);
 }
 
-html.liquid-ui-enabled .liquid-side-panel.liquid-left.is-open {
+html.liquid-ui-enabled .liquid-side-panel.is-open {
+    opacity: 1;
+    visibility: visible;
     transform: translateX(0) translateZ(0);
-    transition: transform 400ms var(--liquid-appear);
-}
-
-html.liquid-ui-enabled .liquid-side-panel.liquid-right.is-open {
-    transform: translateX(0) translateZ(0);
-    transition: transform 450ms var(--liquid-appear);
+    transition: transform 450ms var(--liquid-bounce),
+        opacity var(--liquid-duration-modal) var(--liquid-appear),
+        visibility 0s;
 }
 
 html.liquid-ui-enabled .liquid-side-panel.is-closing {
-    transition: transform 280ms var(--liquid-dismiss);
+    opacity: 0;
+    visibility: hidden;
+    transition: transform var(--liquid-duration-normal) var(--liquid-dismiss),
+        opacity 250ms var(--liquid-dismiss),
+        visibility var(--liquid-duration-normal);
 }
 
 html.liquid-ui-enabled .liquid-side-panel.liquid-left.is-closing {
@@ -247,13 +290,15 @@ html.liquid-ui-enabled .liquid-side-panel.liquid-right.is-closing {
     transform: translateX(100%) translateZ(0);
 }
 
+/* 侧边栏项目交错入场 */
 html.liquid-ui-enabled .liquid-side-panel .menu_button,
 html.liquid-ui-enabled .liquid-side-panel .RightPanelBtn,
 html.liquid-ui-enabled .liquid-side-panel .list-group-item,
 html.liquid-ui-enabled .liquid-side-panel .liquid-info-item {
     opacity: 0;
-    transform: translateY(8px) translateZ(0);
-    transition: opacity 0.3s var(--liquid-appear), transform 0.35s var(--liquid-appear);
+    transform: translateY(12px) translateZ(0);
+    transition: opacity var(--liquid-duration-normal) var(--liquid-appear),
+        transform var(--liquid-duration-slow) var(--liquid-bounce);
 }
 
 html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button,
@@ -265,121 +310,90 @@ html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item {
     transition-delay: var(--liquid-stagger, 80ms);
 }
 
+/* 交错延迟 */
+html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button:nth-child(1),
+html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn:nth-child(1),
+html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item:nth-child(1),
+html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item:nth-child(1) {
+    transition-delay: 0.05s;
+}
+
+html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button:nth-child(2),
+html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn:nth-child(2),
+html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item:nth-child(2),
+html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item:nth-child(2) {
+    transition-delay: 0.10s;
+}
+
+html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button:nth-child(3),
+html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn:nth-child(3),
+html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item:nth-child(3),
+html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item:nth-child(3) {
+    transition-delay: 0.15s;
+}
+
+html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button:nth-child(4),
+html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn:nth-child(4),
+html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item:nth-child(4),
+html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item:nth-child(4) {
+    transition-delay: 0.20s;
+}
+
+html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button:nth-child(5),
+html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn:nth-child(5),
+html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item:nth-child(5),
+html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item:nth-child(5) {
+    transition-delay: 0.25s;
+}
+
+html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button:nth-child(6),
+html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn:nth-child(6),
+html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item:nth-child(6),
+html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item:nth-child(6) {
+    transition-delay: 0.30s;
+}
+
+html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button:nth-child(7),
+html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn:nth-child(7),
+html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item:nth-child(7),
+html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item:nth-child(7) {
+    transition-delay: 0.35s;
+}
+
+html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button:nth-child(8),
+html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn:nth-child(8),
+html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item:nth-child(8),
+html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item:nth-child(8) {
+    transition-delay: 0.40s;
+}
+
+/* 聊天区域在侧边栏打开时的缩放 */
 html.liquid-ui-enabled #chat.when-left-open {
-    transform: translateX(16px) scale(0.98) translateZ(0);
-    filter: brightness(0.72) blur(calc(var(--liquid-blur-progress) * var(--liquid-blur-progress) * 3px));
+    transform: translateX(8px) scale(0.995) translateZ(0);
 }
 
 html.liquid-ui-enabled #chat.when-right-open {
-    transform: translateX(-16px) scale(0.98) translateZ(0);
-    filter: brightness(0.72) blur(calc(var(--liquid-blur-progress) * var(--liquid-blur-progress) * 3px));
+    transform: translateX(-8px) scale(0.995) translateZ(0);
 }
 
 html.liquid-ui-enabled #chat.when-both-open {
-    transform: scale(0.94) translateZ(0);
-    filter: brightness(0.5) blur(calc(var(--liquid-blur-progress) * var(--liquid-blur-progress) * 5px));
+    transform: scale(0.985) translateZ(0);
 }
 
-html.liquid-ui-enabled .panel-overlay.liquid-panel-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0);
-    pointer-events: none;
-    z-index: 999;
-    transition: background 320ms var(--liquid-appear);
-}
-
-html.liquid-ui-enabled .panel-overlay.liquid-panel-overlay.active {
-    background: rgba(0, 0, 0, 0.4);
-    pointer-events: auto;
-}
-
-html.liquid-ui-enabled .liquid-popup-entrance {
-    animation: liquid-modal-in 0.3s var(--liquid-appear) both !important;
-    transform-origin: center;
-}
-
-@keyframes liquid-modal-in {
-    0% {
-        opacity: 0;
-        transform: scale(0.92) translateY(10px) translateZ(0);
-        filter: blur(2px);
-    }
-
-    100% {
-        opacity: 1;
-        transform: scale(1) translateY(0) translateZ(0);
-        filter: blur(0);
-    }
-}
-
-html.liquid-ui-enabled #chat .apple-entrance {
-    animation: liquid-mes-in 0.35s var(--liquid-appear) both;
-    will-change: transform, opacity;
-}
-
-@keyframes liquid-mes-in {
-    0% {
-        opacity: 0;
-        transform: translateY(8px) translateZ(0);
-    }
-
-    100% {
-        opacity: 1;
-        transform: translateY(0) translateZ(0);
-    }
-}
-
-@keyframes liquid-new-flash {
-    0% {
-        opacity: 0;
-        transform: scale(0.96);
-    }
-
-    35% {
-        opacity: 0.8;
-        transform: scale(1);
-    }
-
-    100% {
-        opacity: 0;
-        transform: scale(1.02);
-    }
-}
-
+/* 切换按钮动画 */
 html.liquid-ui-enabled .liquid-panel-toggle-left.is-active {
     transform: rotate(90deg) scale(1.05) translateZ(0);
-    filter: brightness(1.2);
 }
 
 html.liquid-ui-enabled .liquid-panel-toggle-right.is-active {
     transform: scale(1.08) translateZ(0);
-    box-shadow: 0 0 12px rgba(110, 170, 255, 0.3);
 }
 
-html.liquid-ui-enabled #send_textarea:focus {
-    box-shadow: 0 0 0 2px rgba(87, 153, 255, 0.3), 0 4px 16px rgba(0, 0, 0, 0.2);
-    transition: box-shadow 0.25s var(--liquid-appear);
-    animation: liquid-focus-breathe 2.6s ease-in-out infinite;
-}
-
-@keyframes liquid-focus-breathe {
-
-    0%,
-    100% {
-        box-shadow: 0 0 0 2px rgba(87, 153, 255, 0.25), 0 4px 16px rgba(0, 0, 0, 0.2);
-    }
-
-    50% {
-        box-shadow: 0 0 0 3px rgba(87, 153, 255, 0.4), 0 6px 22px rgba(0, 0, 0, 0.28);
-    }
-}
-
+/* 角色头像动画 */
 html.liquid-ui-enabled .liquid-side-panel.liquid-right.is-open .liquid-character-avatar {
     animation: liquid-av-spring 0.45s var(--liquid-spring) forwards,
         liquid-av-breathe 6s ease-in-out infinite 0.65s;
     border-radius: 50%;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
 
 @keyframes liquid-av-spring {
@@ -408,14 +422,15 @@ html.liquid-ui-enabled .liquid-side-panel.liquid-right.is-open .liquid-character
 
     50% {
         transform: scale(1.015) translateY(-2px) translateZ(0);
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
     }
 }
 
+/* 橡皮筋效果 */
 html.liquid-ui-enabled .liquid-rubber-band {
     will-change: transform;
 }
 
+/* 聊天记录卡片 */
 html.liquid-ui-enabled .recentChat {
     cursor: pointer;
     border-radius: 12px;
@@ -431,50 +446,36 @@ html.liquid-ui-enabled .recentChat.hidden {
     opacity: 0 !important;
     pointer-events: none;
     transform: scale(0.96) translateY(-10px) translateZ(0);
-    /* Set height to 0 for accordion effect */
     height: 0;
     padding-top: 0;
     padding-bottom: 0;
     border: none;
     transform-origin: top center;
-    transition: margin 250ms var(--liquid-dismiss), height 250ms var(--liquid-dismiss), opacity 200ms var(--liquid-dismiss), transform 250ms var(--liquid-dismiss), padding 250ms var(--liquid-dismiss) !important;
+    transition: margin 250ms var(--liquid-dismiss),
+        height 250ms var(--liquid-dismiss),
+        opacity 200ms var(--liquid-dismiss),
+        transform 250ms var(--liquid-dismiss),
+        padding 250ms var(--liquid-dismiss) !important;
 }
 
 html.liquid-ui-enabled .recentChat:not(.hidden) {
     height: 72px;
-    /* Standard card height to animate to, fallback if max-height isn't perfect */
     max-height: 120px;
     opacity: 1;
     transform: scale(1) translateY(0) translateZ(0);
-    transition: margin 400ms var(--liquid-spring), height 400ms var(--liquid-spring), opacity 300ms var(--liquid-appear), transform 400ms var(--liquid-spring), padding 400ms var(--liquid-spring) !important;
-}
-
-html.liquid-ui-enabled .recentChat::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(120deg, transparent 0%, var(--liquid-shine) 45%, transparent 70%);
-    transform: translateX(-120%);
-    opacity: 0;
-    pointer-events: none;
-}
-
-html.liquid-ui-enabled .recentChat:hover {
-    filter: brightness(1.08);
-    box-shadow: 0 2px 12px rgba(87, 153, 255, 0.08);
-}
-
-html.liquid-ui-enabled .recentChat:hover::after {
-    opacity: 1;
-    animation: liquid-card-shine 1.2s var(--liquid-appear);
+    transition: margin 400ms var(--liquid-spring),
+        height 400ms var(--liquid-spring),
+        opacity 300ms var(--liquid-appear),
+        transform 400ms var(--liquid-spring),
+        padding 400ms var(--liquid-spring) !important;
 }
 
 html.liquid-ui-enabled .recentChat.liquid-pressed {
     transform: scale(0.97) translateZ(0) !important;
-    filter: brightness(0.92) !important;
-    transition: transform 50ms var(--liquid-press), filter 50ms var(--liquid-press) !important;
+    transition: transform 50ms var(--liquid-press) !important;
 }
 
+/* 点击涟漪效果 */
 html.liquid-ui-enabled .recentChat .liquid-ripple {
     position: absolute;
     border-radius: 50%;
@@ -497,25 +498,18 @@ html.liquid-ui-enabled .recentChat .liquid-ripple {
     }
 }
 
-@keyframes liquid-card-shine {
-    0% {
-        transform: translateX(-120%);
-    }
-
-    100% {
-        transform: translateX(120%);
-    }
-}
-
+/* 页面转场动画 - 主题自适应 */
 html.liquid-ui-enabled.liquid-page-active>body {
-    transition: transform 420ms var(--liquid-spring), filter 420ms var(--liquid-appear), border-radius 420ms var(--liquid-appear);
+    transition: transform var(--liquid-duration-slow) var(--liquid-spring),
+        filter var(--liquid-duration-slow) var(--liquid-appear),
+        border-radius var(--liquid-duration-slow) var(--liquid-appear);
     transform-origin: center center;
     will-change: transform, filter;
 }
 
 html.liquid-ui-enabled.liquid-page-shrunk>body {
     transform: scale(0.93) translateZ(0);
-    filter: brightness(0.55) blur(8px) saturate(120%);
+    filter: brightness(0.55) saturate(120%);
     border-radius: 18px;
     overflow: hidden;
 }
@@ -538,20 +532,53 @@ html.liquid-ui-enabled .liquid-page-scrim.out {
     transition: background 280ms var(--liquid-dismiss) !important;
 }
 
+/* Ghost 容器 - 使用 JS 注入的主题变量，确保全屏覆盖 */
 html.liquid-ui-enabled .liquid-page-ghost {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 10000;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    z-index: 10000 !important;
     pointer-events: none;
     overflow: hidden;
-    background: var(--SmartThemeBlurTintColor, rgba(28, 28, 30, 0.96));
-    box-shadow: 0 12px 50px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-sizing: border-box;
+    /* 优先使用 JS 注入的变量，回退到 SillyTavern 变量，最后使用默认值 */
+    background: var(--liquid-theme-bg, var(--SmartThemeBlurTintColor, var(--body-bg-color, #1c1c1e)));
     will-change: transform, border-radius, opacity;
     transform-origin: center center;
-    transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 420ms cubic-bezier(0.22, 1, 0.36, 1), opacity 280ms var(--liquid-appear);
+    transition: transform var(--liquid-duration-slow) var(--liquid-spring),
+        border-radius var(--liquid-duration-slow) var(--liquid-spring),
+        opacity var(--liquid-duration-normal) var(--liquid-appear);
+    /* 深色主题适配 */
+    color-scheme: dark light;
+    /* 确保在所有层级之上 */
+    isolation: isolate;
+}
+
+/* 浅色主题适配 */
+@media (prefers-color-scheme: light) {
+    html.liquid-ui-enabled .liquid-page-ghost {
+        background: var(--liquid-theme-bg, var(--SmartThemeBlurTintColor, var(--body-bg-color, #f5f5f7)));
+    }
+}
+
+/* SillyTavern 浅色主题类 */
+html.liquid-ui-enabled.light .liquid-page-ghost,
+html.liquid-ui-enabled.theme-light .liquid-page-ghost {
+    background: var(--liquid-theme-bg, var(--SmartThemeBlurTintColor, #f5f5f7));
+}
+
+/* SillyTavern 深色主题类 */
+html.liquid-ui-enabled.dark .liquid-page-ghost,
+html.liquid-ui-enabled.theme-dark .liquid-page-ghost {
+    background: var(--liquid-theme-bg, var(--SmartThemeBlurTintColor, #1c1c1e));
 }
 
 html.liquid-ui-enabled .liquid-page-ghost.out {
@@ -567,18 +594,50 @@ html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-inner {
     height: 100%;
     opacity: 1;
     transform: translateY(0);
-    transition: opacity 280ms var(--liquid-dismiss), transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-    color: #e8e8e8;
+    transition: opacity var(--liquid-duration-normal) var(--liquid-dismiss),
+        transform var(--liquid-duration-slow) var(--liquid-spring);
+    color: var(--liquid-theme-text, var(--SmartThemeQuoteColor, #e8e8e8));
     font-size: 14px;
     line-height: 1.5;
     overflow: hidden;
     box-sizing: border-box;
 }
 
+/* 浅色主题文字颜色 */
+@media (prefers-color-scheme: light) {
+    html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-inner {
+        color: var(--liquid-theme-text, var(--SmartThemeQuoteColor, #1d1d1f));
+    }
+}
+
 html.liquid-ui-enabled .liquid-ghost-content-inv {
     padding: 16px 20px;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
     will-change: transform;
-    transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform var(--liquid-duration-slow) var(--liquid-spring);
+    /* 确保内容正确显示 */
+    overflow: hidden;
+}
+
+/* Ghost 标题样式 - 主题自适应 */
+html.liquid-ui-enabled .liquid-ghost-title {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 4px;
+    color: var(--liquid-theme-text, inherit);
+    opacity: 0.95;
+}
+
+/* Ghost 预览文字样式 */
+html.liquid-ui-enabled .liquid-ghost-preview {
+    font-size: 13px;
+    opacity: 0.65;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--liquid-theme-text, inherit);
 }
 
 html.liquid-ui-enabled .liquid-page-ghost.expanded .liquid-ghost-inner {
@@ -586,6 +645,7 @@ html.liquid-ui-enabled .liquid-page-ghost.expanded .liquid-ghost-inner {
     transform: translateY(-12px);
 }
 
+/* Shine 效果 - 主题自适应 */
 html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-shine {
     position: absolute;
     inset: 0;
@@ -597,8 +657,52 @@ html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-shine {
     transition: opacity 250ms var(--liquid-appear) 200ms;
 }
 
+/* 浅色主题下增强 shine 效果 */
+@media (prefers-color-scheme: light) {
+    html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-shine {
+        background: linear-gradient(110deg, transparent 25%, rgba(0, 0, 0, 0.02) 37%, rgba(0, 0, 0, 0.04) 50%, rgba(0, 0, 0, 0.02) 63%, transparent 75%);
+    }
+}
+
 html.liquid-ui-enabled .liquid-page-ghost.expanded .liquid-ghost-shine {
     opacity: 1;
+}
+
+/* 卡片动画效果 - 不改变布局 */
+html.liquid-ui-enabled .character_select,
+html.liquid-ui-enabled .char_item,
+html.liquid-ui-enabled .char-grid-item,
+html.liquid-ui-enabled .character-grid-item,
+html.liquid-ui-enabled [data-character-id],
+html.liquid-ui-enabled .chat-card,
+html.liquid-ui-enabled .story-card,
+html.liquid-ui-enabled .scenario-card {
+    cursor: pointer;
+    will-change: transform;
+    transition: transform var(--liquid-duration-fast) var(--liquid-spring) !important;
+}
+
+html.liquid-ui-enabled .character_select:hover,
+html.liquid-ui-enabled .char_item:hover,
+html.liquid-ui-enabled .char-grid-item:hover,
+html.liquid-ui-enabled .character-grid-item:hover,
+html.liquid-ui-enabled [data-character-id]:hover,
+html.liquid-ui-enabled .chat-card:hover,
+html.liquid-ui-enabled .story-card:hover,
+html.liquid-ui-enabled .scenario-card:hover {
+    filter: brightness(1.05);
+}
+
+html.liquid-ui-enabled .character_select:active,
+html.liquid-ui-enabled .char_item:active,
+html.liquid-ui-enabled .char-grid-item:active,
+html.liquid-ui-enabled .character-grid-item:active,
+html.liquid-ui-enabled [data-character-id]:active,
+html.liquid-ui-enabled .chat-card:active,
+html.liquid-ui-enabled .story-card:active,
+html.liquid-ui-enabled .scenario-card:active {
+    transform: scale(0.985) translateZ(0) !important;
+    transition: transform var(--liquid-duration-fast) var(--liquid-press) !important;
 }
 
 @keyframes liquid-shine {
@@ -611,97 +715,7 @@ html.liquid-ui-enabled .liquid-page-ghost.expanded .liquid-ghost-shine {
     }
 }
 
-html.liquid-perf-low .liquid-side-panel {
-    -webkit-backdrop-filter: blur(24px) !important;
-    backdrop-filter: blur(24px) !important;
-}
-
-html.liquid-perf-low .liquid-popup-entrance {
-    -webkit-backdrop-filter: blur(16px) !important;
-    backdrop-filter: blur(16px) !important;
-}
-
-html.liquid-perf-medium .liquid-side-panel,
-html.liquid-perf-medium .liquid-popup-entrance {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-}
-
-html.liquid-perf-medium #chat.when-left-open,
-html.liquid-perf-medium #chat.when-right-open,
-html.liquid-perf-medium #chat.when-both-open {
-    filter: brightness(0.72) !important;
-}
-
-html.liquid-perf-medium .liquid-char-reveal,
-html.liquid-perf-medium .liquid-popup-entrance,
-html.liquid-perf-medium #chat .apple-entrance,
-html.liquid-perf-medium .liquid-side-panel .menu_button,
-html.liquid-perf-medium .liquid-side-panel .RightPanelBtn,
-html.liquid-perf-medium .liquid-side-panel .list-group-item,
-html.liquid-perf-medium .liquid-side-panel .liquid-info-item,
-html.liquid-perf-medium .recentChat .liquid-ripple,
-html.liquid-perf-medium #chat .mes.liquid-mes-new::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-}
-
-html.liquid-perf-medium .recentChat::after {
-    animation: none !important;
-    opacity: 0 !important;
-}
-
-html.liquid-perf-medium #send_textarea:focus {
-    animation: none !important;
-}
-
-html.liquid-perf-critical #chat .mes {
-    box-shadow: none !important;
-}
-
-html.liquid-perf-critical .liquid-popup-entrance,
-html.liquid-perf-critical .popup {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
-}
-
-html.liquid-perf-critical .liquid-char-reveal,
-html.liquid-perf-critical .liquid-popup-entrance,
-html.liquid-perf-critical #chat .apple-entrance,
-html.liquid-perf-critical .liquid-side-panel .menu_button,
-html.liquid-perf-critical .liquid-side-panel .RightPanelBtn,
-html.liquid-perf-critical .liquid-side-panel .list-group-item,
-html.liquid-perf-critical .liquid-side-panel .liquid-info-item,
-html.liquid-perf-critical .recentChat .liquid-ripple,
-html.liquid-perf-critical .liquid-page-ghost .liquid-ghost-shine,
-html.liquid-perf-critical #chat .mes.liquid-mes-new::after {
-    animation: none !important;
-    transition-duration: 0.01ms !important;
-}
-
-html.liquid-perf-critical .recentChat::after {
-    animation: none !important;
-    opacity: 0 !important;
-}
-
-html.liquid-perf-critical #send_textarea:focus {
-    animation: none !important;
-}
-
-html.liquid-perf-critical #chat .mes:hover,
-html.liquid-perf-critical .liquid-pressable:hover,
-html.liquid-perf-critical button:hover,
-html.liquid-perf-critical .menu_button:hover,
-html.liquid-perf-critical .right_menu_button:hover,
-html.liquid-perf-critical .recentChat:hover,
-html.liquid-perf-critical [role="button"]:hover,
-html.liquid-perf-critical .header-button:hover {
-    transform: none !important;
-}
-
-html.liquid-perf-critical #chat .mes_text.liquid-cursor::after {
-    animation: none !important;
-}
-
+/* 减少动画偏好 */
 @media (prefers-reduced-motion: reduce) {
 
     html.liquid-ui-enabled *,
@@ -710,5 +724,226 @@ html.liquid-perf-critical #chat .mes_text.liquid-cursor::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
+    }
+}
+
+/* 设置面板样式 */
+.liquid-settings-panel {
+    position: fixed;
+    top: 0;
+    right: -360px;
+    width: 360px;
+    height: 100vh;
+    background: var(--SmartThemeBlurTintColor, #1c1c1e);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 99999;
+    transition: right var(--liquid-duration-modal) var(--liquid-spring);
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--SmartThemeQuoteColor, #e8e8e8);
+    box-sizing: border-box;
+}
+
+.liquid-settings-panel.open {
+    right: 0;
+}
+
+.liquid-settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.liquid-settings-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: inherit;
+}
+
+.liquid-settings-close {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: inherit;
+    border-radius: 8px;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 200ms ease, transform 150ms ease;
+}
+
+.liquid-settings-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.liquid-settings-close:active {
+    transform: scale(0.95);
+}
+
+.liquid-settings-content {
+    padding: 16px 20px;
+    overflow-y: auto;
+    max-height: calc(100vh - 60px);
+}
+
+.liquid-settings-group {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    transition: opacity 200ms ease;
+}
+
+.liquid-settings-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.liquid-settings-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #0a84ff;
+}
+
+.liquid-settings-label span {
+    flex: 1;
+}
+
+.liquid-settings-value {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    min-width: 50px;
+    text-align: right;
+}
+
+.liquid-settings-desc {
+    margin: 8px 0 0 28px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.4;
+}
+
+.liquid-settings-group input[type="range"] {
+    width: 100%;
+    margin-top: 12px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.liquid-settings-group input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: #0a84ff;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 150ms ease;
+}
+
+.liquid-settings-group input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+}
+
+.liquid-settings-group input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: #0a84ff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+}
+
+/* 隐藏数字输入框的上下箭头 */
+.liquid-settings-input-wrapper input[type="number"]::-webkit-inner-spin-button,
+.liquid-settings-input-wrapper input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.liquid-settings-input-wrapper input[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* 设置触发按钮 */
+.liquid-settings-trigger {
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: linear-gradient(135deg, rgba(10, 132, 255, 0.15), rgba(10, 132, 255, 0.05));
+    border: 1px solid rgba(10, 132, 255, 0.3);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 200ms ease, transform 150ms ease, box-shadow 200ms ease;
+}
+
+.liquid-settings-trigger:hover {
+    background: linear-gradient(135deg, rgba(10, 132, 255, 0.25), rgba(10, 132, 255, 0.1));
+    box-shadow: 0 2px 8px rgba(10, 132, 255, 0.2);
+}
+
+.liquid-settings-trigger:active {
+    transform: scale(0.98);
+}
+
+.liquid-settings-trigger-inner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--SmartThemeQuoteColor, #e8e8e8);
+}
+
+/* 浅色主题适配 */
+@media (prefers-color-scheme: light) {
+    .liquid-settings-panel {
+        background: var(--SmartThemeBlurTintColor, #f5f5f7);
+        border-left-color: rgba(0, 0, 0, 0.1);
+        box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
+    }
+
+    .liquid-settings-panel,
+    .liquid-settings-panel * {
+        color: #1d1d1f;
+    }
+
+    .liquid-settings-close {
+        background: rgba(0, 0, 0, 0.08);
+    }
+
+    .liquid-settings-close:hover {
+        background: rgba(0, 0, 0, 0.15);
+    }
+
+    .liquid-settings-group {
+        background: rgba(0, 0, 0, 0.04);
+    }
+
+    .liquid-settings-desc {
+        color: rgba(0, 0, 0, 0.5);
+    }
+
+    .liquid-settings-value {
+        color: rgba(0, 0, 0, 0.6);
+    }
+
+    .liquid-settings-group input[type="range"] {
+        background: rgba(0, 0, 0, 0.15);
     }
 }
