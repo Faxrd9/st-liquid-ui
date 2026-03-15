@@ -6,7 +6,7 @@
   "optional": [],
   "version": "2.0.0",
   "description": "Physics-driven motion system: liquid text reveal, tactile press, hierarchical depth, spring animations & adaptive performance for SillyTavern.",
-  "author": "Faxrd9",
+  "author": "Faxrd9, 哈气的哈吉米",
   "js": [
     "index.js"
   ],

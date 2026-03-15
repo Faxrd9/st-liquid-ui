@@ -4,6 +4,7 @@ const LAST_MES_SEL = '.last_mes';
 const MES_TEXT_SEL = '.mes_text';
 const STREAMING_CLS = 'liquid-streaming-active';
 const OVERLAY_CLS = 'liquid-panel-overlay';
+const NEW_MES_TIMEOUT = 1200;
 
 const L_PANEL = ['#left-menu', '.side-panel.left', '[data-panel="left"]'];
 const R_PANEL = ['#right-menu', '.side-panel.right', '[data-panel="right"]'];
@@ -29,16 +30,32 @@ const INTERACT_SEL = [
 ].join(', ');
 
 const G = /** @type {any} */ (globalThis);
+const idle = G.requestIdleCallback || ((cb, opts = {}) => setTimeout(() => cb({ didTimeout: true, timeRemaining: () => 0 }), opts.timeout ?? 1));
+const cancelIdle = G.cancelIdleCallback || (id => clearTimeout(id));
+const defer = G.queueMicrotask ? cb => G.queueMicrotask(cb) : cb => Promise.resolve().then(cb);
+const ROOT = document.documentElement;
+const OPEN_PANEL_CLS = ['open', 'active', 'show', 'is-open', 'drawer-open'];
+const MES_SEL = `.mes, ${LAST_MES_SEL}`;
+const REVEAL_TAGS = new Set(['SPAN', 'EM', 'STRONG', 'CODE', 'A', 'B', 'I', 'U', 'S', 'MARK', 'SUB', 'SUP']);
+const CLOSING_CLS = new Set(['is-closing', 'is-switching-out']);
 
 function qFirst(sels, root = document) {
-    for (const s of sels) { try { const e = root.querySelector(s); if (e) return e; } catch {} }
+    for (const s of sels) { try { const e = root.querySelector(s); if (e) return e; } catch { } }
     return null;
 }
 
 function qAll(sels, root = document) {
     const r = [], seen = new Set();
-    for (const s of sels) { try { root.querySelectorAll(s).forEach(e => { if (!seen.has(e)) { seen.add(e); r.push(e); } }); } catch {} }
+    for (const s of sels) { try { root.querySelectorAll(s).forEach(e => { if (!seen.has(e)) { seen.add(e); r.push(e); } }); } catch { } }
     return r;
+}
+
+function markNewMessage(el) {
+    if (!(el instanceof HTMLElement)) return;
+    if (el.dataset.liquidNew === '1') return;
+    el.dataset.liquidNew = '1';
+    el.classList.add('liquid-mes-new');
+    setTimeout(() => { el.classList.remove('liquid-mes-new'); }, NEW_MES_TIMEOUT);
 }
 
 
@@ -47,6 +64,7 @@ class PerformanceGuard {
         this.ft = [];
         this.max = 30;
         this.last = 0;
+        this.sum = 0;
         this.on = false;
         this.tier = 'full';
         this.raf = 0;
@@ -55,6 +73,8 @@ class PerformanceGuard {
     start() {
         if (this.on) return;
         this.on = true;
+        this.ft.length = 0;
+        this.sum = 0;
         this.last = performance.now();
         this._t();
     }
@@ -62,11 +82,13 @@ class PerformanceGuard {
     _t() {
         if (!this.on) return;
         this.raf = requestAnimationFrame(now => {
-            this.ft.push(now - this.last);
+            const delta = now - this.last;
             this.last = now;
-            if (this.ft.length > this.max) this.ft.shift();
+            this.ft.push(delta);
+            this.sum += delta;
+            if (this.ft.length > this.max) this.sum -= this.ft.shift();
             if (this.ft.length >= this.max) {
-                this._check(this.ft.reduce((a, b) => a + b, 0) / this.ft.length);
+                this._check(this.sum / this.ft.length);
             }
             this._t();
         });
@@ -78,7 +100,7 @@ class PerformanceGuard {
         else if (avg >= 25) t = 'medium';
         else if (avg >= 20) t = 'low';
         if (t === this.tier) return;
-        const root = document.documentElement;
+        const root = ROOT;
         root.classList.remove('liquid-perf-low', 'liquid-perf-medium', 'liquid-perf-critical');
         if (t !== 'full') {
             root.classList.add(`liquid-perf-${t}`);
@@ -103,6 +125,13 @@ class StreamRevealEngine {
         this.prevLen = 0;
         this.chat = null;
         this.spans = new WeakSet();
+        this.growNodes = new Set();
+        this.growTask = 0;
+        this.stateRaf = 0;
+        this.revealRaf = 0;
+        this.revealIdle = 0;
+        this.scrollRaf = 0;
+        this.reduceMotion = !!G.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
     }
 
     init() {
@@ -111,23 +140,43 @@ class StreamRevealEngine {
 
         this.obs = new MutationObserver(muts => {
             let cursorUpd = false, textChg = false;
+            const chat = this.chat;
+            const text = this.text;
+            const streaming = this.streaming;
             for (const m of muts) {
-                for (const n of m.addedNodes) handleGrown(n);
-                if (this.streaming && this.text) {
-                    if (m.type === 'characterData' && this.text.contains(m.target)) textChg = true;
-                    if (m.type === 'childList' && (this.text.contains(m.target) || m.target === this.text)) textChg = true;
+                if (m.addedNodes?.length) {
+                    for (const n of m.addedNodes) this._queueGrown(n);
                 }
-                if (m.type === 'characterData' || (m.type === 'childList' && m.target.closest?.(CHAT_SEL))) cursorUpd = true;
+                if (!cursorUpd && chat && (m.type === 'characterData' || m.type === 'childList')) {
+                    if (m.target === chat || chat.contains(m.target)) cursorUpd = true;
+                }
+                if (!textChg && streaming && text && (m.type === 'characterData' || m.type === 'childList')) {
+                    if (m.target === text || text.contains(m.target)) textChg = true;
+                }
             }
-            if (cursorUpd) this.updateState();
-            if (textChg) this._reveal();
+            if (cursorUpd) this._queueState();
+            if (textChg) this._queueReveal();
         });
         this.obs.observe(document.body, { childList: true, subtree: true, characterData: true });
 
         this.resObs = new ResizeObserver(() => {
-            if (this.streaming && this.chat) this._scroll();
+            if (this.streaming && this.chat) this._queueScroll();
         });
         this.resObs.observe(this.chat);
+    }
+
+    _queueGrown(node) {
+        if (!(node instanceof HTMLElement)) return;
+        this.growNodes.add(node);
+        if (this.growTask) return;
+        this.growTask = 1;
+        defer(() => {
+            this.growTask = 0;
+            if (!this.growNodes.size) return;
+            const nodes = Array.from(this.growNodes);
+            this.growNodes.clear();
+            for (const n of nodes) handleGrown(n);
+        });
     }
 
     updateState() {
@@ -149,46 +198,86 @@ class StreamRevealEngine {
         this.timer = setTimeout(() => this._end(), 800);
     }
 
+    _queueState() {
+        if (this.stateRaf) return;
+        this.stateRaf = requestAnimationFrame(() => {
+            this.stateRaf = 0;
+            this.updateState();
+        });
+    }
+
+    _queueReveal() {
+        if (this.revealRaf) return;
+        this.revealRaf = requestAnimationFrame(() => {
+            this.revealRaf = 0;
+            this._reveal();
+        });
+    }
+
+    _queueScroll() {
+        if (this.scrollRaf) return;
+        this.scrollRaf = requestAnimationFrame(() => {
+            this.scrollRaf = 0;
+            this._scroll();
+        });
+    }
+
     _reveal() {
         if (!this.text) return;
         const len = (this.text.textContent || '').length;
         if (len <= this.prevLen) { this.prevLen = len; return; }
-        requestIdleCallback(() => this._wrap(this.text));
+        if (!this.revealIdle) {
+            this.revealIdle = idle(() => {
+                this.revealIdle = 0;
+                if (this.text) this._wrap(this.text);
+            }, { timeout: 120 });
+        }
         this.prevLen = len;
     }
 
     _wrap(c) {
         if (!c) return;
+        const spans = this.spans;
         const walker = document.createTreeWalker(c, NodeFilter.SHOW_ELEMENT, {
             acceptNode(n) {
                 if (n.classList?.contains('liquid-char-reveal')) return NodeFilter.FILTER_SKIP;
                 if (n.tagName === 'BR') return NodeFilter.FILTER_SKIP;
-                const tags = ['SPAN', 'EM', 'STRONG', 'CODE', 'A', 'B', 'I', 'U', 'S', 'MARK', 'SUB', 'SUP'];
-                return (tags.includes(n.tagName) && !n.classList?.contains('liquid-char-reveal')) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+                return REVEAL_TAGS.has(n.tagName) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
             }
         });
         const els = [];
         let n;
-        while ((n = walker.nextNode())) { if (!this.spans.has(n) && !n.closest('.liquid-char-reveal')) els.push(n); }
+        while ((n = walker.nextNode())) { if (!spans.has(n) && !n.closest('.liquid-char-reveal')) els.push(n); }
         for (const ch of c.childNodes) {
-            if (ch.nodeType === Node.TEXT_NODE && ch.textContent.trim().length > 0 && !this.spans.has(ch)) {
+            if (ch.nodeType === Node.TEXT_NODE) {
+                const text = ch.textContent;
+                if (!text || !/\S/.test(text)) continue;
                 const s = document.createElement('span');
                 s.className = 'liquid-char-reveal';
                 ch.parentNode.insertBefore(s, ch);
                 s.appendChild(ch);
-                this.spans.add(s);
+                spans.add(s);
             }
         }
-        for (const e of els) { if (e.parentNode && !e.classList.contains('liquid-char-reveal')) { e.classList.add('liquid-char-reveal'); this.spans.add(e); } }
+        for (const e of els) { if (e.parentNode && !e.classList.contains('liquid-char-reveal')) { e.classList.add('liquid-char-reveal'); spans.add(e); } }
     }
 
     _scroll() {
         if (!this.chat) return;
-        const d = this.chat.scrollHeight - this.chat.scrollTop - this.chat.clientHeight;
-        if (d < 150) this.chat.scrollTo({ top: this.chat.scrollHeight, behavior: 'smooth' });
+        const { scrollHeight, scrollTop, clientHeight } = this.chat;
+        const d = scrollHeight - scrollTop - clientHeight;
+        if (d < 150) {
+            const root = ROOT;
+            const cl = root.classList;
+            const lowPerf = cl.contains('liquid-perf-medium') || cl.contains('liquid-perf-critical');
+            const behavior = (this.reduceMotion || lowPerf) ? 'auto' : 'smooth';
+            this.chat.scrollTo({ top: scrollHeight, behavior });
+        }
     }
 
     _end() {
+        if (this.revealIdle) { cancelIdle(this.revealIdle); this.revealIdle = 0; }
+        if (this.revealRaf) { cancelAnimationFrame(this.revealRaf); this.revealRaf = 0; }
         if (this.mes) this.mes.classList.remove('liquid-streaming');
         if (this.text) { this.text.classList.remove('liquid-cursor'); setTimeout(() => this._clean(this.text), 350); }
         if (this.chat) this.chat.classList.remove(STREAMING_CLS);
@@ -200,8 +289,15 @@ class StreamRevealEngine {
 
     _clean(c) {
         if (!c) return;
-        requestIdleCallback(() => {
-            c.querySelectorAll('.liquid-char-reveal').forEach(s => { s.classList.remove('liquid-char-reveal'); s.style.animation = 'none'; });
+        idle(() => {
+            const spans = c.querySelectorAll('.liquid-char-reveal');
+            const len = spans.length;
+            if (!len) return;
+            for (let i = 0; i < len; i++) {
+                const s = spans[i];
+                s.classList.remove('liquid-char-reveal');
+                s.style.animation = 'none';
+            }
         });
     }
 
@@ -209,6 +305,12 @@ class StreamRevealEngine {
         this.obs?.disconnect();
         this.resObs?.disconnect();
         if (this.timer) clearTimeout(this.timer);
+        if (this.stateRaf) cancelAnimationFrame(this.stateRaf);
+        if (this.revealRaf) cancelAnimationFrame(this.revealRaf);
+        if (this.scrollRaf) cancelAnimationFrame(this.scrollRaf);
+        if (this.revealIdle) cancelIdle(this.revealIdle);
+        this.growNodes.clear();
+        this.growTask = 0;
     }
 }
 
@@ -222,6 +324,7 @@ class RubberBandController {
         this.velocity = 0;
         this.raf = 0;
         this.wheelTimer = 0;
+        this.applyRaf = 0;
         this.fns = [];
     }
 
@@ -249,7 +352,7 @@ class RubberBandController {
         if ((e.deltaY < 0 && this._atTop()) || (e.deltaY > 0 && this._atBot())) {
             e.preventDefault();
             this.offset += e.deltaY * 0.5;
-            this._apply();
+            this._queueApply();
             clearTimeout(this.wheelTimer);
             this.wheelTimer = setTimeout(() => this._release(), 100);
         }
@@ -262,19 +365,32 @@ class RubberBandController {
         if ((dy < 0 && this._atTop()) || (dy > 0 && this._atBot())) {
             e.preventDefault();
             this.offset += dy;
-            this._apply();
+            this._queueApply();
         }
     }
 
+    _queueApply() {
+        if (this.applyRaf) return;
+        this.applyRaf = requestAnimationFrame(() => {
+            this.applyRaf = 0;
+            this._apply();
+        });
+    }
+
     _apply() {
-        if (!this.active) { this.active = true; this.chat.classList.add('liquid-rubber-band'); }
-        this.chat.style.transform = `translateY(${-this._rubber(this.offset)}px) translateZ(0)`;
+        if (!this.active) {
+            this.active = true;
+            this.chat.classList.add('liquid-rubber-band');
+            this.chat.style.willChange = 'transform';
+        }
+        this.chat.style.transform = `translate3d(0, ${-this._rubber(this.offset)}px, 0)`;
     }
 
     _release() {
         if (!this.active) return;
         this.velocity = 0;
         if (this.raf) cancelAnimationFrame(this.raf);
+        if (this.applyRaf) { cancelAnimationFrame(this.applyRaf); this.applyRaf = 0; }
         const tick = () => {
             const f = -0.15 * this.offset;
             this.velocity = (this.velocity + f) * 0.75;
@@ -282,35 +398,58 @@ class RubberBandController {
             if (Math.abs(this.offset) < 0.5 && Math.abs(this.velocity) < 0.5) {
                 this.offset = 0; this.velocity = 0; this.active = false;
                 this.chat.style.transform = '';
+                this.chat.style.willChange = '';
                 this.chat.classList.remove('liquid-rubber-band');
                 return;
             }
-            this.chat.style.transform = `translateY(${-this._rubber(this.offset)}px) translateZ(0)`;
+            this.chat.style.transform = `translate3d(0, ${-this._rubber(this.offset)}px, 0)`;
             this.raf = requestAnimationFrame(tick);
         };
         this.raf = requestAnimationFrame(tick);
     }
 
-    destroy() { if (this.raf) cancelAnimationFrame(this.raf); this.fns.forEach(f => { try { f(); } catch {} }); }
+    destroy() {
+        if (this.raf) cancelAnimationFrame(this.raf);
+        if (this.applyRaf) cancelAnimationFrame(this.applyRaf);
+        if (this.chat) this.chat.style.willChange = '';
+        this.fns.forEach(f => { try { f(); } catch { } });
+    }
 }
 
 
 class BlurController {
-    constructor() { this.raf = 0; this.cur = 0; this.tgt = 0; this.vel = 0; }
+    constructor() {
+        this.raf = 0;
+        this.cur = 0;
+        this.tgt = 0;
+        this.vel = 0;
+        this.reduceMotion = !!G.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    }
 
-    set(p) { this.tgt = p; if (!this.raf) this._go(); }
+    set(p) {
+        if (p === this.tgt && (this.raf || this.cur === p)) return;
+        this.tgt = p;
+        if (this.reduceMotion || ROOT.classList.contains('liquid-perf-critical')) {
+            this.cur = this.tgt;
+            ROOT.style.setProperty('--liquid-blur-progress', String(this.cur));
+            if (this.raf) cancelAnimationFrame(this.raf);
+            this.raf = 0;
+            return;
+        }
+        if (!this.raf) this._go();
+    }
 
     _go() {
         this.vel = (this.vel + 0.08 * (this.tgt - this.cur)) * 0.7;
         this.cur += this.vel;
         if (this.cur < 0.001) this.cur = 0;
         if (this.cur > 0.999) this.cur = 1;
-        document.documentElement.style.setProperty('--liquid-blur-progress', String(this.cur));
+        ROOT.style.setProperty('--liquid-blur-progress', String(this.cur));
         if (Math.abs(this.cur - this.tgt) > 0.001 || Math.abs(this.vel) > 0.001) {
             this.raf = requestAnimationFrame(() => this._go());
         } else {
             this.cur = this.tgt;
-            document.documentElement.style.setProperty('--liquid-blur-progress', String(this.cur));
+            ROOT.style.setProperty('--liquid-blur-progress', String(this.cur));
             this.raf = 0;
         }
     }
@@ -328,6 +467,7 @@ class PanelManager {
         this.ov = null;
         this.lb = [];
         this.rb = [];
+        this.uiState = { lo: null, ro: null };
         this.fns = [];
         this.obs = [];
         this.blur = blur;
@@ -412,13 +552,11 @@ class PanelManager {
     _isOpen(p) {
         if (!(p instanceof HTMLElement)) return false;
         const cl = p.classList;
-        if (cl.contains('is-closing') || cl.contains('is-switching-out')) return false;
-        if (['open', 'active', 'show', 'is-open', 'drawer-open'].some(c => cl.contains(c)) || p.hasAttribute('open')) return true;
-        if (window.getComputedStyle(p).display !== 'none' && p.getBoundingClientRect().width > 0) {
-            const t = window.getComputedStyle(p).transform;
-            if (cl.contains('liquid-left') && t.includes('-100')) return false;
-            if (['open', 'active', 'show', 'is-open', 'drawer-open'].some(c => p.parentElement?.classList.contains(c))) return true;
-        }
+        for (const c of CLOSING_CLS) { if (cl.contains(c)) return false; }
+        if (p.hasAttribute('open')) return true;
+        for (const c of OPEN_PANEL_CLS) { if (cl.contains(c)) return true; }
+        const parent = p.parentElement;
+        if (parent) { for (const c of OPEN_PANEL_CLS) { if (parent.classList.contains(c)) return true; } }
         return false;
     }
 
@@ -457,8 +595,11 @@ class PanelManager {
     }
 
     _ui() {
-        const r = document.documentElement;
+        const r = ROOT;
         const lo = this._isOpen(this.lp), ro = this._isOpen(this.rp);
+        if (this.uiState.lo === lo && this.uiState.ro === ro) return;
+        this.uiState.lo = lo;
+        this.uiState.ro = ro;
         r.classList.toggle('liquid-left-open', lo && !ro);
         r.classList.toggle('liquid-right-open', ro && !lo);
         r.classList.toggle('liquid-both-open', lo && ro);
@@ -474,7 +615,7 @@ class PanelManager {
     }
 
     destroy() {
-        this.fns.forEach(f => { try { f(); } catch {} });
+        this.fns.forEach(f => { try { f(); } catch { } });
         this.obs.forEach(o => o.disconnect());
         if (this.ov?.dataset.liquidOwned) this.ov.remove();
     }
@@ -533,12 +674,18 @@ class ClickManager {
         rip.addEventListener('animationend', () => rip.remove(), { once: true });
     }
 
-    destroy() { this.fns.forEach(f => { try { f(); } catch {} }); }
+    destroy() { this.fns.forEach(f => { try { f(); } catch { } }); }
 }
 
 
 class PageTransition {
-    constructor() { this.scrim = null; this.ghost = null; this.busy = false; this.fns = []; }
+    constructor() {
+        this.scrim = null;
+        this.ghost = null;
+        this.busy = false;
+        this.fns = [];
+        this.reduceMotion = !!G.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    }
 
     init() {
         const fn = e => {
@@ -552,9 +699,10 @@ class PageTransition {
     }
 
     _run(card) {
+        const root = ROOT;
+        if (this.reduceMotion || root.classList.contains('liquid-perf-critical')) return;
         this.busy = true;
         const cardRect = card.getBoundingClientRect();
-        const root = document.documentElement;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
 
@@ -569,18 +717,24 @@ class PageTransition {
         inner.className = 'liquid-ghost-inner';
         const name = card.querySelector('strong, .ch_name, .recentChatName');
         const prev = card.querySelector('.recentChatPreview, .mes_text, div:last-child');
+
+        const contentScaleInv = document.createElement('div');
+        contentScaleInv.className = 'liquid-ghost-content-inv';
+
         if (name) {
             const d = document.createElement('div');
             d.style.cssText = 'font-weight:600;font-size:15px;margin-bottom:4px;color:#f0f0f0;';
             d.textContent = name.textContent;
-            inner.appendChild(d);
+            contentScaleInv.appendChild(d);
         }
         if (prev && prev !== name) {
             const d = document.createElement('div');
             d.style.cssText = 'font-size:13px;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
             d.textContent = (prev.textContent || '').substring(0, 100);
-            inner.appendChild(d);
+            contentScaleInv.appendChild(d);
         }
+
+        inner.appendChild(contentScaleInv);
         this.ghost.appendChild(inner);
 
         const shine = document.createElement('div');
@@ -595,24 +749,36 @@ class PageTransition {
         const dy = cy - vh / 2;
 
         this.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
-        this.ghost.style.borderRadius = `${12 / sx}px / ${12 / sy}px`;
+        this.ghost.style.borderRadius = `${16 / sx}px / ${16 / sy}px`;
         this.ghost.style.opacity = '1';
+
+        contentScaleInv.style.transform = `scale(${1 / sx}, ${1 / sy})`;
+        contentScaleInv.style.transformOrigin = 'top left';
+        contentScaleInv.style.width = `${vw}px`;
+        contentScaleInv.style.height = `${vh}px`;
+
         document.body.appendChild(this.ghost);
 
-        this.ghost.offsetHeight;
+        this.ghost.offsetHeight; // force reflow
 
         requestAnimationFrame(() => {
             root.classList.add('liquid-page-active');
             requestAnimationFrame(() => root.classList.add('liquid-page-shrunk'));
             this.scrim.classList.add('active');
+
+            // Expand phase
+            this.ghost.style.transform = 'translate(0px, 0px) scale(1, 1)';
+            this.ghost.style.borderRadius = '0px';
+            contentScaleInv.style.transform = 'scale(1, 1)';
+
             this.ghost.classList.add('expanded');
         });
 
-        setTimeout(() => this._exit(), 520);
+        setTimeout(() => this._exit(), 430);
     }
 
     _exit() {
-        const root = document.documentElement;
+        const root = ROOT;
         if (this.ghost) this.ghost.classList.add('out');
         if (this.scrim) this.scrim.classList.add('out');
         root.classList.remove('liquid-page-shrunk');
@@ -630,32 +796,41 @@ class PageTransition {
     destroy() {
         this.scrim?.remove();
         this.ghost?.remove();
-        document.documentElement.classList.remove('liquid-page-active', 'liquid-page-shrunk');
-        this.fns.forEach(f => { try { f(); } catch {} });
+        ROOT.classList.remove('liquid-page-active', 'liquid-page-shrunk');
+        this.fns.forEach(f => { try { f(); } catch { } });
     }
 }
 
 
 function handleGrown(node) {
     if (!(node instanceof HTMLElement)) return;
+    const cl = node.classList;
+    if (cl.contains('liquid-popup-entrance') || cl.contains('apple-entrance')) return;
     if (node.matches?.(POPUP_SEL)) {
-        if (!node.classList.contains('liquid-popup-entrance')) node.classList.add('liquid-popup-entrance');
+        cl.add('liquid-popup-entrance');
     } else {
-        node.querySelectorAll?.(POPUP_SEL)?.forEach(p => { if (!p.classList.contains('liquid-popup-entrance')) p.classList.add('liquid-popup-entrance'); });
+        const popups = node.querySelectorAll(POPUP_SEL);
+        for (let i = 0, len = popups.length; i < len; i++) popups[i].classList.add('liquid-popup-entrance');
     }
     if (node.matches?.('.mes') || node.matches?.(LAST_MES_SEL)) {
-        if (!node.classList.contains('apple-entrance')) node.classList.add('apple-entrance');
+        cl.add('apple-entrance');
+        markNewMessage(node);
     } else {
-        node.querySelectorAll?.('.mes, ' + LAST_MES_SEL)?.forEach(n => { if (!n.classList.contains('apple-entrance')) n.classList.add('apple-entrance'); });
+        const msgs = node.querySelectorAll(MES_SEL);
+        for (let i = 0, len = msgs.length; i < len; i++) {
+            msgs[i].classList.add('apple-entrance');
+            markNewMessage(msgs[i]);
+        }
     }
 }
 
 
 const state = { perf: null, stream: null, rubber: null, blur: null, panel: null, click: null, page: null, on: false };
 
+
 function boot() {
     if (state.on) return;
-    document.documentElement.classList.add('liquid-ui-enabled');
+    ROOT.classList.add('liquid-ui-enabled');
     state.perf = new PerformanceGuard();
     state.perf.start();
     state.click = new ClickManager();
