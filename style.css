@@ -26,12 +26,8 @@
    排除第三方插件区域（仅排除过渡，保留动画）
    注意：不要匹配 SillyTavern 官方的扩展管理界面
    ============================================ */
- html.liquid-ui-enabled .third-party,
- html.liquid-ui-enabled [id*="third-party"],
- html.liquid-ui-enabled [class*="third-party"],
- html.liquid-ui-enabled [data-third-party] {
-     transition: none !important;
- }
+ /* 已移除：这些选择器过于宽泛，会影响其他插件的样式 */
+ /* 现在只在特定元素上应用liquid动画，而不是全局排除 */
 
  /* ============================================
    文字逐字显示动画 - 简化版
@@ -117,25 +113,34 @@
    统一弹窗动画系统 - iOS 风格
    ============================================ */
 
- /* 弹窗打开 - 从中心放大 + 淡入 */
+ /* 弹窗打开 - 从中心放大 + 淡入
+   注意：只应用于SillyTavern官方弹窗，不应用于第三方插件 */
  html.liquid-ui-enabled .liquid-popup-entrance,
- html.liquid-ui-enabled .popup:not(.hidden),
+ html.liquid-ui-enabled #dialogue_popup:not(.hidden),
  html.liquid-ui-enabled .dialogue_popup:not(.hidden),
- html.liquid-ui-enabled .ui-dialog:not(.hidden),
- html.liquid-ui-enabled .modal:not(.hidden) {
-     animation: liquid-modal-enter 280ms var(--liquid-spring) both !important;
+ html.liquid-ui-enabled .ui-dialog:not(.hidden) {
+     animation: liquid-modal-enter 280ms var(--liquid-spring) both;
      transform-origin: center center;
  }
 
  /* 弹窗关闭 - 向中心缩小 + 淡出 */
  html.liquid-ui-enabled .liquid-popup-exit,
- html.liquid-ui-enabled .popup.hidden,
+ html.liquid-ui-enabled #dialogue_popup.hidden,
  html.liquid-ui-enabled .dialogue_popup.hidden,
- html.liquid-ui-enabled .ui-dialog.hidden,
- html.liquid-ui-enabled .modal.hidden {
-     animation: liquid-modal-exit 200ms var(--liquid-dismiss) both !important;
+ html.liquid-ui-enabled .ui-dialog.hidden {
+     animation: liquid-modal-exit 200ms var(--liquid-dismiss) both;
      transform-origin: center center;
-     pointer-events: none !important;
+     pointer-events: none;
+ }
+
+ /* 排除第三方插件的弹窗 */
+ html.liquid-ui-enabled .third-party .popup,
+ html.liquid-ui-enabled [class*="third-party"] .popup,
+ html.liquid-ui-enabled .third-party .modal,
+ html.liquid-ui-enabled [class*="third-party"] .modal,
+ html.liquid-ui-enabled .extensions-menu .popup,
+ html.liquid-ui-enabled .extensions-menu .modal {
+     animation: none !important;
  }
 
  /* 弹窗打开关键帧 */
@@ -747,11 +752,7 @@
      }
  }
 
- /* 三花按钮 - 弹性入场动画 */
- html.liquid-ui-enabled .third-party-toggle,
- html.liquid-ui-enabled [class*="third-party"],
- html.liquid-ui-enabled [data-extension="third-party"],
- html.liquid-ui-enabled .extension-toggle-bottom,
+ /* 三花按钮 - 弹性入场动画（仅针对SillyTavern官方的扩展按钮） */
  html.liquid-ui-enabled #extensions-toggle,
  html.liquid-ui-enabled .menu_button[title*="扩展"],
  html.liquid-ui-enabled .menu_button[title*="extension"] {
@@ -782,10 +783,6 @@
  }
 
  /* 三花按钮悬停效果 */
- html.liquid-ui-enabled .third-party-toggle:hover,
- html.liquid-ui-enabled [class*="third-party"]:hover,
- html.liquid-ui-enabled [data-extension="third-party"]:hover,
- html.liquid-ui-enabled .extension-toggle-bottom:hover,
  html.liquid-ui-enabled #extensions-toggle:hover,
  html.liquid-ui-enabled .menu_button[title*="扩展"]:hover,
  html.liquid-ui-enabled .menu_button[title*="extension"]:hover {
@@ -794,10 +791,6 @@
  }
 
  /* 三花按钮点击效果 */
- html.liquid-ui-enabled .third-party-toggle:active,
- html.liquid-ui-enabled [class*="third-party"]:active,
- html.liquid-ui-enabled [data-extension="third-party"]:active,
- html.liquid-ui-enabled .extension-toggle-bottom:active,
  html.liquid-ui-enabled #extensions-toggle:active,
  html.liquid-ui-enabled .menu_button[title*="扩展"]:active,
  html.liquid-ui-enabled .menu_button[title*="extension"]:active {
@@ -805,19 +798,15 @@
      transition-duration: 50ms;
  }
 
- /* 扩展面板展开/收起动画 */
- html.liquid-ui-enabled .extensions-panel,
- html.liquid-ui-enabled #extensions-panel,
- html.liquid-ui-enabled [class*="extensions-panel"] {
+ /* 扩展面板展开/收起动画（仅针对SillyTavern官方的扩展面板） */
+ html.liquid-ui-enabled #extensions-panel {
      transition:
          transform var(--liquid-duration-medium) var(--liquid-panel),
          opacity var(--liquid-duration-medium) var(--liquid-appear),
          visibility var(--liquid-duration-medium);
  }
 
- html.liquid-ui-enabled .extensions-panel.open,
- html.liquid-ui-enabled #extensions-panel.open,
- html.liquid-ui-enabled [class*="extensions-panel"].open {
+ html.liquid-ui-enabled #extensions-panel.open {
      animation: liquid-panel-expand 0.35s var(--liquid-spring) both;
  }
 
@@ -836,9 +825,7 @@
  }
 
  /* 扩展面板关闭动画 */
- html.liquid-ui-enabled .extensions-panel.closing,
- html.liquid-ui-enabled #extensions-panel.closing,
- html.liquid-ui-enabled [class*="extensions-panel"].closing {
+ html.liquid-ui-enabled #extensions-panel.closing {
      animation: liquid-panel-collapse 0.25s var(--liquid-dismiss) both;
  }
 

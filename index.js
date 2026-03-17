@@ -1322,7 +1322,7 @@ function handleGrown(node) {
 }
 
 
-// 扩展面板动画控制器
+// 扩展面板动画控制器（仅作用于SillyTavern官方的扩展面板）
 class ExtensionPanelAnimator {
     constructor() {
         this.panel = null;
@@ -1332,9 +1332,22 @@ class ExtensionPanelAnimator {
     }
 
     init() {
-        // 查找扩展面板和切换按钮
-        this.panel = document.querySelector('#extensions-panel, .extensions-panel, [class*="extensions-panel"]');
-        this.toggle = document.querySelector('#extensions-toggle, .extension-toggle, [class*="third-party"], [title*="扩展"], [title*="extension"]');
+        // 只查找SillyTavern官方的扩展面板和切换按钮
+        // 使用更精确的选择器，避免匹配其他插件的元素
+        this.panel = document.querySelector('#extensions-panel');
+        this.toggle = document.querySelector('#extensions-toggle');
+
+        // 如果找不到精确匹配，尝试通过title属性查找官方按钮
+        if (!this.toggle) {
+            const buttons = document.querySelectorAll('.menu_button');
+            for (const btn of buttons) {
+                const title = btn.getAttribute('title') || '';
+                if (title.includes('扩展') || title.includes('extension') || title.includes('Extension')) {
+                    this.toggle = btn;
+                    break;
+                }
+            }
+        }
 
         if (!this.panel && !this.toggle) return false;
 
