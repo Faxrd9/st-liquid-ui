@@ -13,19 +13,13 @@ const STREAM_EVENTS = ['variant_stream_start', 'stream_start', 'message_stream_s
 
 const POPUP_SEL = [
     '.popup', '.wide_dialogue_popup', '#dialogue_popup', '.ui-dialog',
-    '.modal', '.drawer-content', '#past_chats_modal', '.list-group',
-    '.flex-container', '.dialog', '.st-modal', '.st-dialog',
+    '.modal', '.drawer-content', '#past_chats_modal',
+    '.dialog', '.st-modal', '.st-dialog',
     '#WorldInfo', '#char_settings'
 ].join(', ');
 
-const INTERACT_SEL = [
-    'button', '.menu_button', '.right_menu_button', '.list-group-item',
-    'a', 'input[type="button"]', 'input[type="submit"]', 'input[type="checkbox"]',
-    'input[type="radio"]', 'select', '.avatar', '.mes_text', '.ch_name',
-    '[role="button"]', '.expression-item', '.drag-handle', '.liquid-pressable',
-    '.extensionsMenuUpdateIndicator', '.header-button',
-    '.interactable', '.recentChat'
-].join(', ');
+// 排除选择器 - 避免匹配扩展管理面板等官方界面
+const EXCLUDE_SEL = '.extensions-menu, .extension-settings, [data-extension], [class*="extension-"]:not([class*="third-party"]), #extensions-panel, .extensions-panel';
 
 const G = /** @type {any} */ (globalThis);
 const idle = G.requestIdleCallback || ((cb, opts = {}) => setTimeout(() => cb({ didTimeout: true, timeRemaining: () => 0 }), opts.timeout ?? 1));
@@ -37,15 +31,109 @@ const MES_SEL = `.mes, ${LAST_MES_SEL}`;
 const REVEAL_TAGS = new Set(['SPAN', 'EM', 'STRONG', 'CODE', 'A', 'B', 'I', 'U', 'S', 'MARK', 'SUB', 'SUP']);
 const CLOSING_CLS = new Set(['is-closing', 'is-switching-out']);
 
+// 高性能节流函数 - 使用 RAF 代替 setTimeout
+function throttle(fn, limit) {
+    let inThrottle = false, lastArgs = null, rafId = null;
+    return function (...args) {
+        if (!inThrottle) {
+            fn.apply(this, args);
+            inThrottle = true;
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                setTimeout(() => {
+                    inThrottle = false;
+                    if (lastArgs) { fn.apply(this, lastArgs); lastArgs = null; }
+                }, limit);
+            });
+        } else { lastArgs = args; }
+    };
+}
+
+// 高性能防抖函数
+function debounce(fn, wait, immediate = false) {
+    let timeout, rafId;
+    return function (...args) {
+        const later = () => {
+            timeout = null;
+            if (!immediate) fn.apply(this, args);
+        };
+        const callNow = immediate && !timeout;
+        clearTimeout(timeout);
+        cancelAnimationFrame(rafId);
+        timeout = setTimeout(later, wait);
+        if (callNow) fn.apply(this, args);
+    };
+}
+
+// 性能优化：批处理器 - 使用 RAF 优化
+class BatchProcessor {
+    constructor(processFn, delay = 16) {
+        this.queue = new Set();
+        this.rafId = null;
+        this.timer = null;
+        this.processFn = processFn;
+        this.delay = delay;
+        this._boundFlush = this.flush.bind(this);
+    }
+    add(item) {
+        this.queue.add(item);
+        if (!this.rafId && !this.timer) {
+            this.rafId = requestAnimationFrame(() => {
+                this.rafId = null;
+                this.timer = setTimeout(this._boundFlush, this.delay);
+            });
+        }
+    }
+    flush() {
+        if (this.rafId) { cancelAnimationFrame(this.rafId); this.rafId = null; }
+        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        if (!this.queue.size) return;
+        const items = Array.from(this.queue);
+        this.queue.clear();
+        this.processFn(items);
+    }
+    clear() {
+        if (this.rafId) { cancelAnimationFrame(this.rafId); this.rafId = null; }
+        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        this.queue.clear();
+    }
+}
+
+// 缓存 querySelector 结果
+const queryCache = new Map();
+function cachedQuery(sel, root = document) {
+    const key = sel + (root === document ? '' : root.id || root.className);
+    if (queryCache.has(key)) return queryCache.get(key);
+    const el = root.querySelector(sel);
+    if (el) queryCache.set(key, el);
+    return el;
+}
+
 function qFirst(sels, root = document) {
-    for (const s of sels) { try { const e = root.querySelector(s); if (e) return e; } catch { } }
+    for (const s of sels) {
+        try {
+            const e = cachedQuery(s, root);
+            if (e) return e;
+        } catch { }
+    }
     return null;
 }
 
 function qAll(sels, root = document) {
     const r = [], seen = new Set();
-    for (const s of sels) { try { root.querySelectorAll(s).forEach(e => { if (!seen.has(e)) { seen.add(e); r.push(e); } }); } catch { } }
+    for (const s of sels) {
+        try {
+            root.querySelectorAll(s).forEach(e => {
+                if (!seen.has(e)) { seen.add(e); r.push(e); }
+            });
+        } catch { }
+    }
     return r;
+}
+
+// 清理 query 缓存
+function clearQueryCache() {
+    queryCache.clear();
 }
 
 
@@ -67,51 +155,87 @@ class StreamRevealEngine {
         this.revealIdle = 0;
         this.scrollRaf = 0;
         this.reduceMotion = !!G.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+        // 性能优化
+        this.revealCount = 0;
+        this.lastRevealTime = 0;
+        this.lastTextContent = '';
+        this.scrollThrottle = throttle(() => this._scroll(), 50);
+        this.growBatch = new BatchProcessor(nodes => {
+            for (const n of nodes) handleGrown(n);
+        }, 16);
+        // 使用 IntersectionObserver 优化可见性检测
+        this.visibleCache = new Map();
+        this.io = null;
     }
 
     init() {
         this.chat = document.querySelector(CHAT_SEL);
         if (!this.chat) return;
 
+        // 优化：只监听聊天区域，而不是整个 document.body
         this.obs = new MutationObserver(muts => {
             let cursorUpd = false, textChg = false;
             const chat = this.chat;
             const text = this.text;
             const streaming = this.streaming;
-            for (const m of muts) {
+
+            // 批量处理 mutations
+            for (let i = 0, len = muts.length; i < len; i++) {
+                const m = muts[i];
                 if (m.addedNodes?.length) {
-                    for (const n of m.addedNodes) this._queueGrown(n);
+                    for (let j = 0, jlen = m.addedNodes.length; j < jlen; j++) {
+                        const node = m.addedNodes[j];
+                        // 只处理 HTMLElement 节点
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            this.growBatch.add(node);
+                        }
+                    }
                 }
-                if (!cursorUpd && chat && (m.type === 'characterData' || m.type === 'childList')) {
-                    if (m.target === chat || chat.contains(m.target)) cursorUpd = true;
+                if (!cursorUpd && (m.type === 'characterData' || m.type === 'childList')) {
+                    // 优化：使用 contains 前先检查是否是目标节点
+                    const target = m.target;
+                    if (target === chat || (target.compareDocumentPosition(chat) & Node.DOCUMENT_POSITION_CONTAINS)) {
+                        cursorUpd = true;
+                    }
                 }
                 if (!textChg && streaming && text && (m.type === 'characterData' || m.type === 'childList')) {
-                    if (m.target === text || text.contains(m.target)) textChg = true;
+                    const target = m.target;
+                    if (target === text || (target.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_CONTAINS)) {
+                        textChg = true;
+                    }
                 }
             }
             if (cursorUpd) this._queueState();
             if (textChg) this._queueReveal();
         });
-        this.obs.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-        this.resObs = new ResizeObserver(() => {
-            if (this.streaming && this.chat) this._queueScroll();
+        // 优化：只监听聊天区域，大幅减少回调频率
+        this.obs.observe(this.chat, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+            characterDataOldValue: false
+        });
+
+        // 优化：使用 ResizeObserver 但节流
+        this.resObs = new ResizeObserver(entries => {
+            if (this.streaming && this.chat) {
+                // 使用 requestAnimationFrame 节流
+                if (this.scrollRaf) return;
+                this.scrollRaf = requestAnimationFrame(() => {
+                    this.scrollRaf = 0;
+                    this.scrollThrottle();
+                });
+            }
         });
         this.resObs.observe(this.chat);
-    }
 
-    _queueGrown(node) {
-        if (!(node instanceof HTMLElement)) return;
-        this.growNodes.add(node);
-        if (this.growTask) return;
-        this.growTask = 1;
-        defer(() => {
-            this.growTask = 0;
-            if (!this.growNodes.size) return;
-            const nodes = Array.from(this.growNodes);
-            this.growNodes.clear();
-            for (const n of nodes) handleGrown(n);
-        });
+        // 初始化 IntersectionObserver 用于可见性优化
+        this.io = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                this.visibleCache.set(entry.target, entry.isIntersecting);
+            }
+        }, { root: this.chat, threshold: 0 });
     }
 
     updateState() {
@@ -120,14 +244,31 @@ class StreamRevealEngine {
         if (!last) return;
         const txt = last.querySelector(MES_TEXT_SEL);
         if (!txt) return;
-        if (this.mes && this.mes !== last) this.mes.classList.remove('liquid-streaming');
-        if (this.text && this.text !== txt) { this.text.classList.remove('liquid-cursor'); this._clean(this.text); }
-        if (this.mes !== last || this.text !== txt) this.prevLen = 0;
+
+        // 优化：批量处理 class 操作
+        if (this.mes && this.mes !== last) {
+            this.mes.classList.remove('liquid-streaming');
+        }
+        if (this.text && this.text !== txt) {
+            this.text.classList.remove('liquid-cursor');
+            this._clean(this.text);
+        }
+        if (this.mes !== last || this.text !== txt) {
+            this.prevLen = 0;
+            this.revealCount = 0;
+            this.lastTextContent = '';
+        }
+
         this.mes = last;
         this.text = txt;
-        last.classList.add('liquid-streaming');
-        txt.classList.add('liquid-cursor');
-        this.chat.classList.add(STREAMING_CLS);
+
+        // 使用 requestAnimationFrame 批量处理 DOM 操作
+        requestAnimationFrame(() => {
+            if (last) last.classList.add('liquid-streaming');
+            if (txt) txt.classList.add('liquid-cursor');
+            if (this.chat) this.chat.classList.add(STREAMING_CLS);
+        });
+
         this.streaming = true;
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => this._end(), 800);
@@ -149,23 +290,40 @@ class StreamRevealEngine {
         });
     }
 
-    _queueScroll() {
-        if (this.scrollRaf) return;
-        this.scrollRaf = requestAnimationFrame(() => {
-            this.scrollRaf = 0;
-            this._scroll();
-        });
-    }
-
     _reveal() {
         if (!this.text) return;
-        const len = (this.text.textContent || '').length;
-        if (len <= this.prevLen) { this.prevLen = len; return; }
-        if (!this.revealIdle) {
+        const textContent = this.text.textContent || '';
+        const len = textContent.length;
+        if (len <= this.prevLen) {
+            this.prevLen = len;
+            this.lastTextContent = textContent;
+            return;
+        }
+
+        const now = performance.now();
+        const delta = len - this.prevLen;
+        this.revealCount++;
+
+        // 优化：如果文本内容没有实质性变化，跳过处理
+        if (textContent === this.lastTextContent) {
+            this.prevLen = len;
+            return;
+        }
+
+        // 优化：更智能的触发条件
+        const shouldProcess = !this.revealIdle && (
+            this.revealCount % 5 === 0 ||  // 增加间隔
+            delta > 80 ||                   // 增加阈值
+            now - this.lastRevealTime > 150 // 增加时间间隔
+        );
+
+        if (shouldProcess) {
+            this.lastRevealTime = now;
+            this.lastTextContent = textContent;
             this.revealIdle = idle(() => {
                 this.revealIdle = 0;
                 if (this.text) this._wrap(this.text);
-            }, { timeout: 120 });
+            }, { timeout: 100 }); // 增加 timeout
         }
         this.prevLen = len;
     }
@@ -173,33 +331,56 @@ class StreamRevealEngine {
     _wrap(c) {
         if (!c) return;
         const spans = this.spans;
-        const walker = document.createTreeWalker(c, NodeFilter.SHOW_ELEMENT, {
+
+        // 优化：使用更高效的文本节点收集
+        const textNodes = [];
+        const walker = document.createTreeWalker(c, NodeFilter.SHOW_TEXT, {
             acceptNode(n) {
-                if (n.classList?.contains('liquid-char-reveal')) return NodeFilter.FILTER_SKIP;
-                if (n.tagName === 'BR') return NodeFilter.FILTER_SKIP;
-                return REVEAL_TAGS.has(n.tagName) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+                // 跳过空白文本
+                if (!n.textContent || !/\S/.test(n.textContent)) return NodeFilter.FILTER_SKIP;
+                // 跳过已经在 reveal 容器中的
+                if (n.parentElement?.classList?.contains('liquid-char-reveal')) return NodeFilter.FILTER_SKIP;
+                return NodeFilter.FILTER_ACCEPT;
             }
         });
-        const els = [];
-        let n;
-        while ((n = walker.nextNode())) { if (!spans.has(n) && !n.closest('.liquid-char-reveal')) els.push(n); }
-        for (const ch of c.childNodes) {
-            if (ch.nodeType === Node.TEXT_NODE) {
-                const text = ch.textContent;
-                if (!text || !/\S/.test(text)) continue;
-                // 创建双层结构：外层保持位置，内层做动画
-                const outer = document.createElement('span');
-                outer.className = 'liquid-char-reveal';
-                const inner = document.createElement('span');
-                inner.className = 'liquid-char-inner';
-                inner.textContent = text;
-                outer.appendChild(inner);
-                ch.parentNode.insertBefore(outer, ch);
-                ch.remove();
-                spans.add(outer);
-            }
+
+        let node;
+        while ((node = walker.nextNode())) {
+            textNodes.push(node);
         }
-        for (const e of els) { if (e.parentNode && !e.classList.contains('liquid-char-reveal')) { e.classList.add('liquid-char-reveal'); spans.add(e); } }
+
+        // 优化：批量创建和插入元素
+        if (textNodes.length === 0) return;
+
+        const fragment = document.createDocumentFragment();
+        const nodesToReplace = [];
+
+        for (const textNode of textNodes) {
+            const text = textNode.textContent;
+            if (!text || !/\S/.test(text)) continue;
+
+            const outer = document.createElement('span');
+            outer.className = 'liquid-char-reveal';
+            const inner = document.createElement('span');
+            inner.className = 'liquid-char-inner';
+            inner.textContent = text;
+            outer.appendChild(inner);
+
+            // 缓存到 WeakSet
+            spans.add(outer);
+
+            // 记录需要替换的节点
+            nodesToReplace.push({ oldNode: textNode, newNode: outer });
+        }
+
+        // 批量替换节点
+        requestAnimationFrame(() => {
+            for (const { oldNode, newNode } of nodesToReplace) {
+                if (oldNode.parentNode) {
+                    oldNode.parentNode.replaceChild(newNode, oldNode);
+                }
+            }
+        });
     }
 
     _scroll() {
@@ -215,13 +396,23 @@ class StreamRevealEngine {
     _end() {
         if (this.revealIdle) { cancelIdle(this.revealIdle); this.revealIdle = 0; }
         if (this.revealRaf) { cancelAnimationFrame(this.revealRaf); this.revealRaf = 0; }
-        if (this.mes) this.mes.classList.remove('liquid-streaming');
-        if (this.text) { this.text.classList.remove('liquid-cursor'); setTimeout(() => this._clean(this.text), 350); }
-        if (this.chat) this.chat.classList.remove(STREAMING_CLS);
+
+        // 优化：批量移除 class
+        requestAnimationFrame(() => {
+            if (this.mes) this.mes.classList.remove('liquid-streaming');
+            if (this.text) {
+                this.text.classList.remove('liquid-cursor');
+                setTimeout(() => this._clean(this.text), 350);
+            }
+            if (this.chat) this.chat.classList.remove(STREAMING_CLS);
+        });
+
         this.streaming = false;
         this.mes = null;
         this.text = null;
         this.prevLen = 0;
+        this.revealCount = 0;
+        this.lastTextContent = '';
     }
 
     _clean(c) {
@@ -230,17 +421,42 @@ class StreamRevealEngine {
             const spans = c.querySelectorAll('.liquid-char-reveal');
             const len = spans.length;
             if (!len) return;
-            for (let i = 0; i < len; i++) {
-                const s = spans[i];
-                s.classList.remove('liquid-char-reveal');
-                s.style.animation = 'none';
-            }
-        });
+
+            // 优化：批量处理，每批处理 50 个
+            const batchSize = 50;
+            let index = 0;
+
+            const processBatch = () => {
+                const end = Math.min(index + batchSize, len);
+                for (let i = index; i < end; i++) {
+                    const s = spans[i];
+                    const inner = s.querySelector('.liquid-char-inner');
+                    if (inner && inner.textContent) {
+                        const textNode = document.createTextNode(inner.textContent);
+                        s.parentNode.replaceChild(textNode, s);
+                    } else {
+                        s.classList.remove('liquid-char-reveal');
+                        s.style.animation = 'none';
+                    }
+                }
+                index = end;
+                if (index < len) {
+                    requestAnimationFrame(processBatch);
+                } else {
+                    c.normalize();
+                }
+            };
+
+            processBatch();
+        }, { timeout: 200 });
     }
 
     destroy() {
         this.obs?.disconnect();
         this.resObs?.disconnect();
+        this.io?.disconnect();
+        this.growBatch.clear();
+        this.visibleCache.clear();
         if (this.timer) clearTimeout(this.timer);
         if (this.stateRaf) cancelAnimationFrame(this.stateRaf);
         if (this.revealRaf) cancelAnimationFrame(this.revealRaf);
@@ -263,32 +479,259 @@ class RubberBandController {
         this.wheelTimer = 0;
         this.applyRaf = 0;
         this.fns = [];
+        // 性能优化：缓存边界检查结果
+        this._cachedAtTop = false;
+        this._cachedAtBot = false;
+        this._cacheValid = false;
+        this._boundHandlers = {};
+        // 添加滚动容器白名单
+        this._scrollContainers = new Set();
+        // 标记是否有展开的面板
+        this._hasExpandedPanel = false;
     }
 
     init() {
         this.chat = document.querySelector(CHAT_SEL);
         if (!this.chat) return;
-        const w = e => this._wheel(e);
-        const ts = e => { if (e.touches.length) this.touchY = e.touches[0].clientY; };
-        const tm = e => this._touchMove(e);
-        const te = () => this._release();
-        this.chat.addEventListener('wheel', w, { passive: false });
-        this.chat.addEventListener('touchstart', ts, { passive: true });
-        this.chat.addEventListener('touchmove', tm, { passive: false });
-        this.chat.addEventListener('touchend', te, { passive: true });
-        this.chat.addEventListener('touchcancel', te, { passive: true });
-        this.fns.push(() => { this.chat?.removeEventListener('wheel', w); this.chat?.removeEventListener('touchstart', ts); this.chat?.removeEventListener('touchmove', tm); this.chat?.removeEventListener('touchend', te); this.chat?.removeEventListener('touchcancel', te); });
+
+        // 绑定并缓存事件处理器
+        this._boundHandlers.wheel = this._wheel.bind(this);
+        this._boundHandlers.touchStart = this._touchStart.bind(this);
+        this._boundHandlers.touchMove = this._touchMove.bind(this);
+        this._boundHandlers.touchEnd = this._release.bind(this);
+
+        const { wheel, touchStart, touchMove, touchEnd } = this._boundHandlers;
+
+        // 使用 passive: true 优化滚动性能，只在需要时阻止默认行为
+        // 但首先检查是否在可滚动容器内
+        this.chat.addEventListener('wheel', wheel, { passive: false });
+        this.chat.addEventListener('touchstart', touchStart, { passive: true });
+        this.chat.addEventListener('touchmove', touchMove, { passive: false });
+        this.chat.addEventListener('touchend', touchEnd, { passive: true });
+        this.chat.addEventListener('touchcancel', touchEnd, { passive: true });
+
+        // 监听滚动事件来更新缓存
+        this.chat.addEventListener('scroll', () => {
+            this._cacheValid = false;
+        }, { passive: true });
+
+        // 监听动态添加的可滚动容器
+        this._observeScrollContainers();
+
+        this.fns.push(() => {
+            this.chat?.removeEventListener('wheel', wheel);
+            this.chat?.removeEventListener('touchstart', touchStart);
+            this.chat?.removeEventListener('touchmove', touchMove);
+            this.chat?.removeEventListener('touchend', touchEnd);
+            this.chat?.removeEventListener('touchcancel', touchEnd);
+            this._scrollObserver?.disconnect();
+        });
     }
 
-    _atTop() { return this.chat && this.chat.scrollTop <= 0; }
-    _atBot() { return this.chat && this.chat.scrollTop + this.chat.clientHeight >= this.chat.scrollHeight - 1; }
-    _rubber(o) { const s = o > 0 ? 1 : -1; return s * (Math.abs(o) * 0.4) / (1 + Math.abs(o) * 0.003); }
+    // 检查元素是否在可滚动容器内（排除聊天区域本身）
+    _isInScrollContainer(target) {
+        // 检查目标元素或其父元素是否是可滚动容器
+        let el = target;
+        while (el && el !== document.body) {
+            // 如果是聊天区域本身，不视为"可滚动容器"（允许橡皮筋效果）
+            if (el === this.chat) {
+                return false;
+            }
+            // 检查是否是已知的可滚动容器
+            if (this._scrollContainers.has(el)) {
+                return true;
+            }
+            // 检查是否有滚动能力
+            const style = getComputedStyle(el);
+            const overflow = style.overflow + style.overflowY + style.overflowX;
+            if ((overflow.includes('auto') || overflow.includes('scroll')) && el.scrollHeight > el.clientHeight) {
+                this._scrollContainers.add(el);
+                return true;
+            }
+            el = el.parentElement;
+        }
+        return false;
+    }
+
+    // 观察动态添加的可滚动容器
+    _observeScrollContainers() {
+        this._scrollObserver = new MutationObserver((muts) => {
+            for (const m of muts) {
+                if (m.addedNodes?.length) {
+                    for (const node of m.addedNodes) {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            // 检查新添加的节点是否包含可滚动容器
+                            const scrollables = node.querySelectorAll?.('[style*="overflow"], .drawer-content, .inline-drawer-content, .scrollableInner, [class*="scroll"]');
+                            if (scrollables) {
+                                scrollables.forEach(el => {
+                                    const style = getComputedStyle(el);
+                                    const overflow = style.overflow + style.overflowY + style.overflowX;
+                                    if (overflow.includes('auto') || overflow.includes('scroll')) {
+                                        this._scrollContainers.add(el);
+                                    }
+                                });
+                            }
+                            // 检查节点本身
+                            if (node.style?.overflow || node.classList?.contains('scrollable')) {
+                                this._scrollContainers.add(node);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        this._scrollObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // 检查是否有展开的列表面板
+    _hasExpandedList() {
+        // 检查常见的展开列表面板选择器
+        const expandedSelectors = [
+            '.recentChat.expanded',
+            '.chat-list.expanded',
+            '[class*="expanded"]',
+            '.drawer-content:not(.closed)',
+            '.inline-drawer-content[style*="display: block"]',
+            '.inline-drawer-content:not(.hidden)',
+            '[class*="open"]:not(.liquid-side-panel)',
+            '.menu-open',
+            '.dropdown-open'
+        ];
+
+        for (const selector of expandedSelectors) {
+            try {
+                const el = document.querySelector(selector);
+                if (el && el.offsetHeight > 100) { // 确保是实际可见的展开内容
+                    return true;
+                }
+            } catch (e) {
+                // 忽略无效选择器
+            }
+        }
+
+        // 检查是否有高度超过100px的浮动/下拉面板
+        const panels = document.querySelectorAll('.drawer-content, .inline-drawer-content, [class*="dropdown"], [class*="menu"]');
+        for (const panel of panels) {
+            const style = getComputedStyle(panel);
+            if (style.display !== 'none' && style.visibility !== 'hidden' && panel.offsetHeight > 100) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // 检查鼠标/触摸点是否在展开的列表面板区域内
+    _isMouseOverExpandedPanel() {
+        // 获取鼠标位置（如果可用）
+        let x, y;
+        if (window.event) {
+            x = window.event.clientX;
+            y = window.event.clientY;
+        } else {
+            // 如果没有事件对象，检查当前焦点元素是否在展开面板内
+            const activeEl = document.activeElement;
+            if (activeEl) {
+                return this._isInExpandedPanel(activeEl);
+            }
+            return false;
+        }
+
+        // 检查鼠标位置下的元素
+        const el = document.elementFromPoint(x, y);
+        if (!el) return false;
+
+        return this._isInExpandedPanel(el);
+    }
+
+    // 检查元素是否在展开的面板内
+    _isInExpandedPanel(el) {
+        if (!el) return false;
+
+        // 检查元素或其父元素是否是展开的面板
+        let current = el;
+        while (current && current !== document.body) {
+            // 检查是否是展开的面板
+            const style = getComputedStyle(current);
+            if (style.display !== 'none' && style.visibility !== 'hidden') {
+                // 检查是否是可滚动的展开面板
+                const overflow = style.overflow + style.overflowY + style.overflowX;
+                const isScrollable = overflow.includes('auto') || overflow.includes('scroll');
+                const hasContent = current.scrollHeight > current.clientHeight;
+
+                // 检查是否是已知的展开面板类型
+                const isExpandedPanel = current.classList.contains('expanded') ||
+                    current.classList.contains('drawer-content') ||
+                    current.classList.contains('inline-drawer-content') ||
+                    current.classList.contains('open') ||
+                    current.classList.contains('active') ||
+                    current.hasAttribute('open');
+
+                if (isExpandedPanel && (isScrollable || current.offsetHeight > 100)) {
+                    return true;
+                }
+            }
+            current = current.parentElement;
+        }
+
+        return false;
+    }
+
+    _touchStart(e) {
+        if (e.touches.length) {
+            this.touchY = e.touches[0].clientY;
+            this._cacheValid = false;
+        }
+    }
+
+    _atTop() {
+        if (!this._cacheValid) this._updateCache();
+        return this._cachedAtTop;
+    }
+
+    _atBot() {
+        if (!this._cacheValid) this._updateCache();
+        return this._cachedAtBot;
+    }
+
+    _updateCache() {
+        if (!this.chat) return;
+        const { scrollTop, scrollHeight, clientHeight } = this.chat;
+        this._cachedAtTop = scrollTop <= 0;
+        this._cachedAtBot = scrollTop + clientHeight >= scrollHeight - 1;
+        this._cacheValid = true;
+    }
+
+    _rubber(o) {
+        const absO = Math.abs(o);
+        const s = o > 0 ? 1 : -1;
+        // 优化：使用位运算和更简单的数学
+        return s * (absO * 0.4) / (1 + absO * 0.003);
+    }
 
     _wheel(e) {
         if (!this.chat) return;
-        if ((e.deltaY < 0 && this._atTop()) || (e.deltaY > 0 && this._atBot())) {
+
+        // 检查鼠标/焦点是否在可滚动容器内，如果是则不触发橡皮筋效果
+        if (this._isInScrollContainer(e.target)) {
+            return;
+        }
+
+        // 检查鼠标是否在展开的列表面板区域内，如果是则不触发橡皮筋效果
+        if (this._isMouseOverExpandedPanel()) {
+            return;
+        }
+
+        const deltaY = e.deltaY;
+        // 优化：快速路径检查
+        if (deltaY === 0) return;
+
+        const isUp = deltaY < 0;
+        const shouldRubber = (isUp && this._atTop()) || (!isUp && this._atBot());
+
+        if (shouldRubber) {
             e.preventDefault();
-            this.offset += e.deltaY * 0.5;
+            this.offset += deltaY * 0.5;
             this._queueApply();
             clearTimeout(this.wheelTimer);
             this.wheelTimer = setTimeout(() => this._release(), 100);
@@ -297,9 +740,25 @@ class RubberBandController {
 
     _touchMove(e) {
         if (!this.chat || !e.touches.length) return;
-        const dy = this.touchY - e.touches[0].clientY;
-        this.touchY = e.touches[0].clientY;
-        if ((dy < 0 && this._atTop()) || (dy > 0 && this._atBot())) {
+
+        // 检查触摸点是否在可滚动容器内，如果是则不触发橡皮筋效果
+        if (this._isInScrollContainer(e.target)) {
+            return;
+        }
+
+        // 检查触摸点是否在展开的列表面板区域内，如果是则不触发橡皮筋效果
+        if (this._isMouseOverExpandedPanel()) {
+            return;
+        }
+
+        const touch = e.touches[0];
+        const dy = this.touchY - touch.clientY;
+        this.touchY = touch.clientY;
+
+        const isUp = dy < 0;
+        const shouldRubber = (isUp && this._atTop()) || (!isUp && this._atBot());
+
+        if (shouldRubber) {
             e.preventDefault();
             this.offset += dy;
             this._queueApply();
@@ -318,8 +777,10 @@ class RubberBandController {
         if (!this.active) {
             this.active = true;
             this.chat.classList.add('liquid-rubber-band');
+            // 优化：使用 will-change 提示浏览器
             this.chat.style.willChange = 'transform';
         }
+        // 优化：使用 translate3d 触发 GPU 加速
         this.chat.style.transform = `translate3d(0, ${-this._rubber(this.offset)}px, 0)`;
     }
 
@@ -328,12 +789,21 @@ class RubberBandController {
         this.velocity = 0;
         if (this.raf) cancelAnimationFrame(this.raf);
         if (this.applyRaf) { cancelAnimationFrame(this.applyRaf); this.applyRaf = 0; }
-        const tick = () => {
-            const f = -0.15 * this.offset;
-            this.velocity = (this.velocity + f) * 0.75;
-            this.offset += this.velocity;
+
+        // 优化：使用更高效的动画循环
+        let lastTime = performance.now();
+        const tick = (now) => {
+            const dt = Math.min((now - lastTime) / 16.67, 2); // 限制最大时间步长
+            lastTime = now;
+
+            const f = -0.15 * this.offset * dt;
+            this.velocity = (this.velocity + f) * Math.pow(0.75, dt);
+            this.offset += this.velocity * dt;
+
             if (Math.abs(this.offset) < 0.5 && Math.abs(this.velocity) < 0.5) {
-                this.offset = 0; this.velocity = 0; this.active = false;
+                this.offset = 0;
+                this.velocity = 0;
+                this.active = false;
                 this.chat.style.transform = '';
                 this.chat.style.willChange = '';
                 this.chat.classList.remove('liquid-rubber-band');
@@ -348,8 +818,14 @@ class RubberBandController {
     destroy() {
         if (this.raf) cancelAnimationFrame(this.raf);
         if (this.applyRaf) cancelAnimationFrame(this.applyRaf);
-        if (this.chat) this.chat.style.willChange = '';
+        if (this.wheelTimer) clearTimeout(this.wheelTimer);
+        if (this.chat) {
+            this.chat.style.willChange = '';
+            this.chat.style.transform = '';
+            this.chat.classList.remove('liquid-rubber-band');
+        }
         this.fns.forEach(f => { try { f(); } catch { } });
+        this._boundHandlers = {};
     }
 }
 
@@ -365,6 +841,12 @@ class PanelManager {
         this.uiState = { lo: null, ro: null };
         this.fns = [];
         this.obs = [];
+        // 性能优化：使用 RAF 节流代替 setTimeout
+        this._uiRaf = null;
+        this._boundUiImpl = this._uiImpl.bind(this);
+        // 缓存 _isOpen 结果
+        this._openCache = new WeakMap();
+        this._cacheTs = 0;
     }
 
     init() {
@@ -372,8 +854,13 @@ class PanelManager {
         this.lp = qFirst(L_PANEL);
         this.rp = qFirst(R_PANEL);
         if (!this.lp && !this.rp) return false;
-        this._enhance(this.lp, 'left');
-        this._enhance(this.rp, 'right');
+
+        // 使用 requestAnimationFrame 批量处理 DOM 操作
+        requestAnimationFrame(() => {
+            this._enhance(this.lp, 'left');
+            this._enhance(this.rp, 'right');
+        });
+
         this._toggles();
         this._closeBinds();
         this._observe();
@@ -388,44 +875,75 @@ class PanelManager {
         if (side === 'right') {
             const av = qFirst(['.character-avatar', '.avatar', 'img'], p);
             if (av) av.classList.add('liquid-character-avatar');
-            qAll(['.info-row', '.card', '.ch_name', '.stat-card'], p).slice(0, 15).forEach((item, i) => {
+
+            const items = qAll(['.info-row', '.card', '.ch_name', '.stat-card'], p);
+            const maxItems = Math.min(items.length, 12); // 减少最大项目数
+            for (let i = 0; i < maxItems; i++) {
+                const item = items[i];
                 if (!item.classList.contains('liquid-info-item')) {
                     item.classList.add('liquid-info-item');
-                    item.style.setProperty('--liquid-stagger', `${180 + i * 35}ms`);
+                    // 减少交错延迟
+                    item.style.setProperty('--liquid-stagger', `${120 + i * 25}ms`);
                 }
-            });
+            }
         }
     }
 
     _toggles() {
         this.lb = qAll(L_TOGGLE).filter(e => !(this.lp?.contains(e) || this.rp?.contains(e)));
         this.rb = qAll(R_TOGGLE).filter(e => !(this.lp?.contains(e) || this.rp?.contains(e)));
-        const hl = () => this.toggle('left');
-        const hr = () => this.toggle('right');
-        this.lb.forEach(b => { b.classList.add('liquid-panel-toggle-left'); b.addEventListener('click', hl); this.fns.push(() => b.removeEventListener('click', hl)); });
-        this.rb.forEach(b => { b.classList.add('liquid-panel-toggle-right'); b.addEventListener('click', hr); this.fns.push(() => b.removeEventListener('click', hr)); });
+
+        // 绑定事件处理器
+        this._boundToggleLeft = () => this.toggle('left');
+        this._boundToggleRight = () => this.toggle('right');
+
+        this.lb.forEach(b => {
+            b.classList.add('liquid-panel-toggle-left');
+            b.addEventListener('click', this._boundToggleLeft);
+            this.fns.push(() => b.removeEventListener('click', this._boundToggleLeft));
+        });
+        this.rb.forEach(b => {
+            b.classList.add('liquid-panel-toggle-right');
+            b.addEventListener('click', this._boundToggleRight);
+            this.fns.push(() => b.removeEventListener('click', this._boundToggleRight));
+        });
     }
 
     _closeBinds() {
         if (this.chat) {
-            const c = e => {
+            this._boundCloseHandler = (e) => {
                 if (!this._isOpen(this.lp) && !this._isOpen(this.rp)) return;
                 if (!e.target || e.target.closest('a, button, input, textarea, select')) return;
                 if (this.lp?.contains(e.target) || this.rp?.contains(e.target)) return;
                 this.close();
             };
-            this.chat.addEventListener('click', c, { passive: true });
-            this.fns.push(() => this.chat?.removeEventListener('click', c));
+            this.chat.addEventListener('click', this._boundCloseHandler, { passive: true });
+            this.fns.push(() => this.chat?.removeEventListener('click', this._boundCloseHandler));
         }
-        const esc = e => { if (e.key === 'Escape') this.close(); };
-        document.addEventListener('keydown', esc);
-        this.fns.push(() => document.removeEventListener('keydown', esc));
+        this._boundEscHandler = (e) => {
+            if (e.key === 'Escape') this.close();
+        };
+        document.addEventListener('keydown', this._boundEscHandler);
+        this.fns.push(() => document.removeEventListener('keydown', this._boundEscHandler));
     }
 
     _observe() {
         [this.lp, this.rp].forEach(p => {
             if (!(p instanceof HTMLElement)) return;
-            const o = new MutationObserver(() => this._ui());
+            const o = new MutationObserver((muts) => {
+                // 优化：批量处理 mutation，只在 class 变化时触发
+                let shouldUpdate = false;
+                for (const m of muts) {
+                    if (m.type === 'attributes' && (m.attributeName === 'class' || m.attributeName === 'open')) {
+                        shouldUpdate = true;
+                        break;
+                    }
+                }
+                if (shouldUpdate) {
+                    this._openCache.delete(p);
+                    this._ui();
+                }
+            });
             o.observe(p, { attributes: true, attributeFilter: ['class', 'open', 'style'] });
             this.obs.push(o);
         });
@@ -433,12 +951,26 @@ class PanelManager {
 
     _isOpen(p) {
         if (!(p instanceof HTMLElement)) return false;
+
+        // 检查缓存
+        const now = Date.now();
+        if (now - this._cacheTs > 100) {
+            this._openCache = new WeakMap(); // 定期清理缓存
+            this._cacheTs = now;
+        }
+        if (this._openCache.has(p)) return this._openCache.get(p);
+
         const cl = p.classList;
-        for (const c of CLOSING_CLS) { if (cl.contains(c)) return false; }
-        if (p.hasAttribute('open')) return true;
-        for (const c of OPEN_PANEL_CLS) { if (cl.contains(c)) return true; }
+        for (const c of CLOSING_CLS) { if (cl.contains(c)) { this._openCache.set(p, false); return false; } }
+        if (p.hasAttribute('open')) { this._openCache.set(p, true); return true; }
+        for (const c of OPEN_PANEL_CLS) { if (cl.contains(c)) { this._openCache.set(p, true); return true; } }
         const parent = p.parentElement;
-        if (parent) { for (const c of OPEN_PANEL_CLS) { if (parent.classList.contains(c)) return true; } }
+        if (parent) {
+            for (const c of OPEN_PANEL_CLS) {
+                if (parent.classList.contains(c)) { this._openCache.set(p, true); return true; }
+            }
+        }
+        this._openCache.set(p, false);
         return false;
     }
 
@@ -446,26 +978,31 @@ class PanelManager {
         const tgt = side === 'left' ? this.lp : this.rp;
         const oth = side === 'left' ? this.rp : this.lp;
         if (!tgt) return;
-        if (oth && this._isOpen(oth)) {
-            oth.classList.remove('is-open', 'open', 'active', 'show');
-            oth.removeAttribute('open');
-            oth.classList.add('is-switching-out');
-            setTimeout(() => oth.classList.remove('is-switching-out'), 300);
-        }
-        tgt.classList.remove('is-closing', 'is-switching-out');
-        tgt.classList.add('is-open');
-        this._ui();
+
+        requestAnimationFrame(() => {
+            if (oth && this._isOpen(oth)) {
+                oth.classList.remove('is-open', 'open', 'active', 'show');
+                oth.removeAttribute('open');
+                oth.classList.add('is-switching-out');
+                setTimeout(() => oth.classList.remove('is-switching-out'), 280);
+            }
+            tgt.classList.remove('is-closing', 'is-switching-out');
+            tgt.classList.add('is-open');
+            this._ui();
+        });
     }
 
     close() {
-        [this.lp, this.rp].forEach(p => {
-            if (!this._isOpen(p)) return;
-            p.classList.remove('is-open', 'open', 'active', 'show');
-            p.removeAttribute('open');
-            p.classList.add('is-closing');
-            setTimeout(() => p.classList.remove('is-closing'), 300);
+        requestAnimationFrame(() => {
+            [this.lp, this.rp].forEach(p => {
+                if (!this._isOpen(p)) return;
+                p.classList.remove('is-open', 'open', 'active', 'show');
+                p.removeAttribute('open');
+                p.classList.add('is-closing');
+                setTimeout(() => p.classList.remove('is-closing'), 280);
+            });
+            this._ui();
         });
-        this._ui();
     }
 
     toggle(side) {
@@ -475,84 +1012,46 @@ class PanelManager {
     }
 
     _ui() {
+        // 使用 RAF 节流
+        if (this._uiRaf) return;
+        this._uiRaf = requestAnimationFrame(() => {
+            this._uiRaf = null;
+            this._boundUiImpl();
+        });
+    }
+
+    _uiImpl() {
         const r = ROOT;
         const lo = this._isOpen(this.lp), ro = this._isOpen(this.rp);
         if (this.uiState.lo === lo && this.uiState.ro === ro) return;
         this.uiState.lo = lo;
         this.uiState.ro = ro;
+
+        // 批量处理 class 操作
         r.classList.toggle('liquid-left-open', lo && !ro);
         r.classList.toggle('liquid-right-open', ro && !lo);
         r.classList.toggle('liquid-both-open', lo && ro);
+
         if (this.chat) {
-            this.chat.classList.remove('when-left-open', 'when-right-open', 'when-both-open');
-            if (lo && ro) this.chat.classList.add('when-both-open');
-            else if (lo) this.chat.classList.add('when-left-open');
-            else if (ro) this.chat.classList.add('when-right-open');
+            const chat = this.chat;
+            chat.classList.remove('when-left-open', 'when-right-open', 'when-both-open');
+            if (lo && ro) chat.classList.add('when-both-open');
+            else if (lo) chat.classList.add('when-left-open');
+            else if (ro) chat.classList.add('when-right-open');
         }
-        this.lb.forEach(b => b.classList.toggle('is-active', lo && !ro));
-        this.rb.forEach(b => b.classList.toggle('is-active', ro && !lo));
+
+        // 批量处理按钮状态
+        const lb = this.lb, rb = this.rb;
+        for (let i = 0; i < lb.length; i++) lb[i].classList.toggle('is-active', lo && !ro);
+        for (let i = 0; i < rb.length; i++) rb[i].classList.toggle('is-active', ro && !lo);
     }
 
     destroy() {
+        if (this._uiRaf) cancelAnimationFrame(this._uiRaf);
         this.fns.forEach(f => { try { f(); } catch { } });
         this.obs.forEach(o => o.disconnect());
+        this._openCache = new WeakMap();
     }
-}
-
-
-class ClickManager {
-    constructor() { this.el = null; this.ty = 0; this.tx = 0; this.fns = []; this._bind(); }
-
-    _bind() {
-        const d = e => this._down(e);
-        const u = () => this._up();
-        const m = e => this._move(e);
-        document.body.addEventListener('mousedown', d);
-        document.body.addEventListener('touchstart', d, { passive: true });
-        document.body.addEventListener('mouseup', u);
-        document.body.addEventListener('touchend', u);
-        document.body.addEventListener('touchcancel', u);
-        document.body.addEventListener('touchmove', m, { passive: true });
-        this.fns.push(() => { document.body.removeEventListener('mousedown', d); document.body.removeEventListener('touchstart', d); document.body.removeEventListener('mouseup', u); document.body.removeEventListener('touchend', u); document.body.removeEventListener('touchcancel', u); document.body.removeEventListener('touchmove', m); });
-    }
-
-    _target(t) { return (t instanceof Element) ? t.closest(INTERACT_SEL) : null; }
-
-    _down(e) {
-        if (e.button && e.button !== 0) return;
-        const t = this._target(e.target);
-        if (!t) return;
-        if (e.type === 'touchstart' && e.touches?.length) { this.ty = e.touches[0].clientY; this.tx = e.touches[0].clientX; }
-        if (!t.classList.contains('liquid-pressable')) t.classList.add('liquid-pressable');
-        this.el = t;
-        t.classList.add('liquid-pressed');
-        if (t.classList.contains('recentChat') || t.closest?.('.recentChat')) {
-            const card = t.classList.contains('recentChat') ? t : t.closest('.recentChat');
-            this._ripple(card, e);
-        }
-    }
-
-    _move(e) {
-        if (!this.el || !e.touches?.length) return;
-        if (Math.abs(e.touches[0].clientX - this.tx) > 10 || Math.abs(e.touches[0].clientY - this.ty) > 10) this._up();
-    }
-
-    _up() { if (this.el) { this.el.classList.remove('liquid-pressed'); this.el = null; } }
-
-    _ripple(card, e) {
-        if (!card) return;
-        const r = card.getBoundingClientRect();
-        const x = (e.touches?.length ? e.touches[0].clientX : e.clientX || 0) - r.left;
-        const y = (e.touches?.length ? e.touches[0].clientY : e.clientY || 0) - r.top;
-        const sz = Math.max(r.width, r.height) * 1.5;
-        const rip = document.createElement('span');
-        rip.className = 'liquid-ripple';
-        rip.style.cssText = `width:${sz}px;height:${sz}px;left:${x - sz / 2}px;top:${y - sz / 2}px;`;
-        card.appendChild(rip);
-        rip.addEventListener('animationend', () => rip.remove(), { once: true });
-    }
-
-    destroy() { this.fns.forEach(f => { try { f(); } catch { } }); }
 }
 
 
@@ -563,7 +1062,6 @@ class PageTransition {
         this.busy = false;
         this.fns = [];
         this.reduceMotion = !!G.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-        // 扩展触发元素选择器，适配更多 SillyTavern 卡片类型
         this.cardSel = [
             '.recentChat',
             '.character_select',
@@ -577,8 +1075,11 @@ class PageTransition {
             '.story-card',
             '.scenario-card'
         ].join(', ');
-        // 排除点击的选择器
         this.excludeSel = '.pinChat, .renameChat, .deleteChat, .recentChatActions, .char_edit, .char_info_button, [data-action], button, .fa, .fa-solid, .fa-regular, svg';
+        // 性能优化：缓存主题颜色
+        this._cachedBg = null;
+        this._cachedText = null;
+        this._themeCacheTime = 0;
     }
 
     init() {
@@ -586,83 +1087,90 @@ class PageTransition {
             const card = e.target?.closest?.(this.cardSel);
             if (!card || this.busy) return;
             if (e.target?.closest?.(this.excludeSel)) return;
+            // 排除扩展管理面板等官方界面
+            if (card.matches?.(EXCLUDE_SEL) || card.closest?.(EXCLUDE_SEL)) return;
             this._run(card);
         };
         document.addEventListener('click', fn, true);
         this.fns.push(() => document.removeEventListener('click', fn, true));
     }
 
-    // 获取主题背景色
     _getThemeBg() {
-        // 优先级：CSS 变量 -> computed style -> 默认值
+        const now = Date.now();
+        if (this._cachedBg && now - this._themeCacheTime < 5000) return this._cachedBg;
+
         const root = document.documentElement;
         const body = document.body;
+        const style = getComputedStyle(root);
 
-        // 尝试获取 SillyTavern 主题变量
-        let bg = getComputedStyle(root).getPropertyValue('--SmartThemeBlurTintColor')?.trim();
-        if (bg && bg !== '') return bg;
+        let bg = style.getPropertyValue('--SmartThemeBlurTintColor')?.trim();
+        if (bg && bg !== '') { this._cachedBg = bg; this._themeCacheTime = now; return bg; }
 
-        bg = getComputedStyle(root).getPropertyValue('--body-bg-color')?.trim();
-        if (bg && bg !== '') return bg;
+        bg = style.getPropertyValue('--body-bg-color')?.trim();
+        if (bg && bg !== '') { this._cachedBg = bg; this._themeCacheTime = now; return bg; }
 
-        bg = getComputedStyle(root).getPropertyValue('--background-color')?.trim();
-        if (bg && bg !== '') return bg;
+        bg = style.getPropertyValue('--background-color')?.trim();
+        if (bg && bg !== '') { this._cachedBg = bg; this._themeCacheTime = now; return bg; }
 
-        bg = getComputedStyle(root).getPropertyValue('--SmartThemeBodyColor')?.trim();
-        if (bg && bg !== '') return bg;
+        bg = style.getPropertyValue('--SmartThemeBodyColor')?.trim();
+        if (bg && bg !== '') { this._cachedBg = bg; this._themeCacheTime = now; return bg; }
 
-        // 尝试 body 背景
         const bodyBg = getComputedStyle(body).backgroundColor;
-        if (bodyBg && bodyBg !== 'rgba(0, 0, 0, 0)' && bodyBg !== 'transparent') return bodyBg;
-
-        // 深色/浅色模式检测
-        const isDark = root.classList.contains('dark') ||
-            window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ||
-            getComputedStyle(body).colorScheme === 'dark';
-        return isDark ? '#1c1c1e' : '#f5f5f7';
-    }
-
-    // 获取主题文字颜色
-    _getThemeText() {
-        const root = document.documentElement;
-
-        let color = getComputedStyle(root).getPropertyValue('--SmartThemeQuoteColor')?.trim();
-        if (color && color !== '') return color;
-
-        color = getComputedStyle(root).getPropertyValue('--text-color')?.trim();
-        if (color && color !== '') return color;
-
-        color = getComputedStyle(root).getPropertyValue('--SmartThemeBodyColor')?.trim();
-        if (color && color !== '') return color;
-
-        const bodyColor = getComputedStyle(document.body).color;
-        if (bodyColor && bodyColor !== '') return bodyColor;
+        if (bodyBg && bodyBg !== 'rgba(0, 0, 0, 0)' && bodyBg !== 'transparent') {
+            this._cachedBg = bodyBg; this._themeCacheTime = now; return bodyBg;
+        }
 
         const isDark = root.classList.contains('dark') ||
             window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
-        return isDark ? '#e8e8e8' : '#1d1d1f';
+        this._cachedBg = isDark ? '#1c1c1e' : '#f5f5f7';
+        this._themeCacheTime = now;
+        return this._cachedBg;
+    }
+
+    _getThemeText() {
+        const now = Date.now();
+        if (this._cachedText && now - this._themeCacheTime < 5000) return this._cachedText;
+
+        const root = document.documentElement;
+        const style = getComputedStyle(root);
+
+        let color = style.getPropertyValue('--SmartThemeQuoteColor')?.trim();
+        if (color && color !== '') { this._cachedText = color; this._themeCacheTime = now; return color; }
+
+        color = style.getPropertyValue('--text-color')?.trim();
+        if (color && color !== '') { this._cachedText = color; this._themeCacheTime = now; return color; }
+
+        color = style.getPropertyValue('--SmartThemeBodyColor')?.trim();
+        if (color && color !== '') { this._cachedText = color; this._themeCacheTime = now; return color; }
+
+        const bodyColor = getComputedStyle(document.body).color;
+        if (bodyColor && bodyColor !== '') { this._cachedText = bodyColor; this._themeCacheTime = now; return bodyColor; }
+
+        const isDark = root.classList.contains('dark') ||
+            window.matchMedia?.('(prefers-color-scheme: dark)')?.matches;
+        this._cachedText = isDark ? '#e8e8e8' : '#1d1d1f';
+        this._themeCacheTime = now;
+        return this._cachedText;
     }
 
     _run(card) {
         const root = ROOT;
         if (this.reduceMotion) return;
         this.busy = true;
+
         const cardRect = card.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
 
-        // 获取主题颜色
         const themeBg = this._getThemeBg();
         const themeText = this._getThemeText();
 
         this.scrim = document.createElement('div');
         this.scrim.className = 'liquid-page-scrim';
-        // 添加到 html 元素，避免受 body 缩放影响
         ROOT.appendChild(this.scrim);
 
         this.ghost = document.createElement('div');
         this.ghost.className = 'liquid-page-ghost';
-        // 确保完全覆盖视口
         this.ghost.style.cssText = `
             position: fixed;
             top: 0;
@@ -672,21 +1180,18 @@ class PageTransition {
             margin: 0;
             padding: 0;
         `;
-        // 应用主题背景色
         this.ghost.style.setProperty('--liquid-theme-bg', themeBg);
         this.ghost.style.setProperty('--liquid-theme-text', themeText);
 
         const inner = document.createElement('div');
         inner.className = 'liquid-ghost-inner';
 
-        // 扩展选择器，适配更多卡片类型
         const name = card.querySelector('strong, .ch_name, .recentChatName, .char_name, .name, h2, h3, .title');
         const prev = card.querySelector('.recentChatPreview, .mes_text, .char_preview, .preview, .description, div:last-child, p');
 
         const contentScaleInv = document.createElement('div');
         contentScaleInv.className = 'liquid-ghost-content-inv';
 
-        // 尝试获取卡片的圆角
         const cardRadius = getComputedStyle(card).borderRadius || '12px';
 
         if (name) {
@@ -716,16 +1221,13 @@ class PageTransition {
         const dx = cx - vw / 2;
         const dy = cy - vh / 2;
 
-        // 解析卡片圆角值
         const radiusMatch = cardRadius.match(/(\d+(?:\.\d+)?)(?:px|rem|em)?/);
         const radius = radiusMatch ? parseFloat(radiusMatch[1]) : 12;
 
-        // 初始状态：从卡片位置开始，使用 transform-origin 确保从中心展开
         this.ghost.style.transformOrigin = 'center center';
         this.ghost.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
         this.ghost.style.borderRadius = `${radius / Math.max(sx, 0.01)}px / ${radius / Math.max(sy, 0.01)}px`;
         this.ghost.style.opacity = '1';
-        // 确保初始状态可见
         this.ghost.style.overflow = 'hidden';
 
         contentScaleInv.style.transform = `scale(${1 / Math.max(sx, 0.01)}, ${1 / Math.max(sy, 0.01)})`;
@@ -733,17 +1235,15 @@ class PageTransition {
         contentScaleInv.style.width = `${vw}px`;
         contentScaleInv.style.height = `${vh}px`;
 
-        // 添加到 html 元素，避免受 body 缩放影响
         ROOT.appendChild(this.ghost);
 
-        this.ghost.offsetHeight; // force reflow
+        this.ghost.offsetHeight;
 
         requestAnimationFrame(() => {
             root.classList.add('liquid-page-active');
             requestAnimationFrame(() => root.classList.add('liquid-page-shrunk'));
             this.scrim.classList.add('active');
 
-            // Expand phase - 展开到全屏
             this.ghost.style.transform = 'translate(0, 0) scale(1, 1)';
             this.ghost.style.borderRadius = '0';
             contentScaleInv.style.transform = 'scale(1, 1)';
@@ -781,290 +1281,122 @@ class PageTransition {
 
 function handleGrown(node) {
     if (!(node instanceof HTMLElement)) return;
+
+    // 检查是否在排除列表中（扩展管理面板等官方界面）
+    if (node.matches?.(EXCLUDE_SEL) || node.closest?.(EXCLUDE_SEL)) return;
+
     const cl = node.classList;
     if (cl.contains('liquid-popup-entrance') || cl.contains('apple-entrance')) return;
-    if (node.matches?.(POPUP_SEL)) {
+
+    // 检查是否为弹窗，但排除扩展管理面板
+    if (node.matches?.(POPUP_SEL) && !node.matches?.(EXCLUDE_SEL)) {
         cl.add('liquid-popup-entrance');
     } else {
         const popups = node.querySelectorAll(POPUP_SEL);
-        for (let i = 0, len = popups.length; i < len; i++) popups[i].classList.add('liquid-popup-entrance');
+        for (let i = 0, len = popups.length; i < len; i++) {
+            const popup = popups[i];
+            // 排除扩展管理面板相关的元素
+            if (!popup.matches?.(EXCLUDE_SEL) && !popup.closest?.(EXCLUDE_SEL)) {
+                popup.classList.add('liquid-popup-entrance');
+            }
+        }
     }
+
     if (node.matches?.('.mes') || node.matches?.(LAST_MES_SEL)) {
         cl.add('apple-entrance');
     } else {
         const msgs = node.querySelectorAll(MES_SEL);
-        for (let i = 0, len = msgs.length; i < len; i++) {
-            msgs[i].classList.add('apple-entrance');
+        for (let i = 0, len = msgs.length; i < len; i++) msgs[i].classList.add('apple-entrance');
+    }
+
+    // 为最近聊天列表项添加交错索引
+    if (node.matches?.('.recentChat')) {
+        const parent = node.parentElement;
+        if (parent) {
+            const siblings = parent.querySelectorAll('.recentChat');
+            siblings.forEach((item, index) => {
+                item.style.setProperty('--item-index', index);
+            });
         }
     }
 }
 
 
-// 设置管理
-const SETTINGS_KEY = 'liquid-ui-settings';
-const defaultSettings = {
-    pressFeedback: true,      // 弹动反馈开关
-    pressIntensity: 15,       // 弹动强度 (0-100，对应 scale 1.0-0.5)
-    pressDuration: 100,       // 弹动持续时间 (ms)
-    excludeChatText: false    // 仅对聊天文字关闭
-};
-
-// 将强度值转换为 scale 值
-function intensityToScale(intensity) {
-    // 0% = 1.0 (无弹动), 100% = 0.5 (最大弹动)
-    return 1 - (intensity / 100) * 0.5;
-}
-
-function loadSettings() {
-    try {
-        const saved = localStorage.getItem(SETTINGS_KEY);
-        if (saved) {
-            return { ...defaultSettings, ...JSON.parse(saved) };
-        }
-    } catch (e) { }
-    return { ...defaultSettings };
-}
-
-function saveSettings(settings) {
-    try {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    } catch (e) { }
-}
-
-function applySettings(settings) {
-    const root = ROOT;
-    const scale = intensityToScale(settings.pressIntensity);
-    root.style.setProperty('--liquid-press-scale', scale);
-    root.style.setProperty('--liquid-press-duration', `${settings.pressDuration}ms`);
-    root.classList.toggle('liquid-press-disabled', !settings.pressFeedback);
-    root.classList.toggle('liquid-chat-text-press-disabled', settings.excludeChatText);
-}
-
-const state = { stream: null, rubber: null, panel: null, click: null, page: null, settings: null, settingsPanel: null, on: false };
-
-
-function createSettingsPanel() {
-    const settings = state.settings;
-
-    const panel = document.createElement('div');
-    panel.id = 'liquid-ui-settings';
-    panel.className = 'liquid-settings-panel';
-    panel.innerHTML = `
-        <div class="liquid-settings-header">
-            <span class="liquid-settings-title">Liquid UI 设置</span>
-            <button class="liquid-settings-close" title="关闭">×</button>
-        </div>
-        <div class="liquid-settings-content">
-            <div class="liquid-settings-group">
-                <label class="liquid-settings-label">
-                    <input type="checkbox" id="liquid-press-feedback" ${settings.pressFeedback ? 'checked' : ''}>
-                    <span>启用弹动反馈</span>
-                </label>
-                <p class="liquid-settings-desc">点击按钮和卡片时的缩放动画效果</p>
-            </div>
-            <div class="liquid-settings-group" id="liquid-press-scale-group" ${!settings.pressFeedback ? 'style="opacity:0.5;pointer-events:none"' : ''}>
-                <label class="liquid-settings-label">
-                    <span>弹动强度</span>
-                    <div class="liquid-settings-input-wrapper" style="display:flex;align-items:center;gap:4px;">
-                        <input type="number" id="liquid-press-scale-input" class="liquid-settings-input" min="0" max="100" value="${settings.pressIntensity}" style="width:60px;text-align:right;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 6px;color:inherit;font-size:13px;">
-                        <span>%</span>
-                    </div>
-                </label>
-                <input type="range" id="liquid-press-scale" min="0" max="100" step="1" value="${settings.pressIntensity}">
-            </div>
-            <div class="liquid-settings-group" id="liquid-press-duration-group" ${!settings.pressFeedback ? 'style="opacity:0.5;pointer-events:none"' : ''}>
-                <label class="liquid-settings-label">
-                    <span>弹动时长</span>
-                    <div class="liquid-settings-input-wrapper" style="display:flex;align-items:center;gap:4px;">
-                        <input type="number" id="liquid-press-duration-input" class="liquid-settings-input" min="50" max="200" step="10" value="${settings.pressDuration}" style="width:60px;text-align:right;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:4px;padding:2px 6px;color:inherit;font-size:13px;">
-                        <span>ms</span>
-                    </div>
-                </label>
-                <input type="range" id="liquid-press-duration" min="50" max="200" step="10" value="${settings.pressDuration}">
-            </div>
-            <div class="liquid-settings-group" id="liquid-exclude-chat-group" ${!settings.pressFeedback ? 'style="opacity:0.5;pointer-events:none"' : ''}>
-                <label class="liquid-settings-label">
-                    <input type="checkbox" id="liquid-exclude-chat" ${settings.excludeChatText ? 'checked' : ''}>
-                    <span>仅对聊天文字关闭弹动</span>
-                </label>
-                <p class="liquid-settings-desc">聊天消息区域不应用弹动效果</p>
-            </div>
-        </div>
-    `;
-
-    // 事件绑定
-    const closeBtn = panel.querySelector('.liquid-settings-close');
-    const pressFeedbackCb = panel.querySelector('#liquid-press-feedback');
-    const pressScaleRange = panel.querySelector('#liquid-press-scale');
-    const pressDurationRange = panel.querySelector('#liquid-press-duration');
-    const excludeChatCb = panel.querySelector('#liquid-exclude-chat');
-    const scaleGroup = panel.querySelector('#liquid-press-scale-group');
-    const durationGroup = panel.querySelector('#liquid-press-duration-group');
-    const excludeGroup = panel.querySelector('#liquid-exclude-chat-group');
-
-    closeBtn.addEventListener('click', () => {
-        panel.classList.remove('open');
-    });
-
-    pressFeedbackCb.addEventListener('change', (e) => {
-        settings.pressFeedback = e.target.checked;
-        const disabled = !settings.pressFeedback;
-        scaleGroup.style.opacity = disabled ? '0.5' : '1';
-        scaleGroup.style.pointerEvents = disabled ? 'none' : 'auto';
-        durationGroup.style.opacity = disabled ? '0.5' : '1';
-        durationGroup.style.pointerEvents = disabled ? 'none' : 'auto';
-        excludeGroup.style.opacity = disabled ? '0.5' : '1';
-        excludeGroup.style.pointerEvents = disabled ? 'none' : 'auto';
-        saveSettings(settings);
-        applySettings(settings);
-    });
-
-    const pressScaleInput = panel.querySelector('#liquid-press-scale-input');
-
-    pressScaleRange.addEventListener('input', (e) => {
-        settings.pressIntensity = parseInt(e.target.value);
-        pressScaleInput.value = settings.pressIntensity;
-        saveSettings(settings);
-        applySettings(settings);
-    });
-
-    pressScaleInput.addEventListener('input', (e) => {
-        let val = parseInt(e.target.value) || 0;
-        val = Math.max(0, Math.min(100, val));
-        settings.pressIntensity = val;
-        pressScaleRange.value = val;
-        saveSettings(settings);
-        applySettings(settings);
-    });
-
-    pressScaleInput.addEventListener('blur', (e) => {
-        let val = parseInt(e.target.value) || 0;
-        val = Math.max(0, Math.min(100, val));
-        e.target.value = val;
-        settings.pressIntensity = val;
-        pressScaleRange.value = val;
-        saveSettings(settings);
-        applySettings(settings);
-    });
-
-    const pressDurationInput = panel.querySelector('#liquid-press-duration-input');
-
-    pressDurationRange.addEventListener('input', (e) => {
-        settings.pressDuration = parseInt(e.target.value);
-        pressDurationInput.value = settings.pressDuration;
-        saveSettings(settings);
-        applySettings(settings);
-    });
-
-    pressDurationInput.addEventListener('input', (e) => {
-        let val = parseInt(e.target.value) || 50;
-        val = Math.max(50, Math.min(200, val));
-        settings.pressDuration = val;
-        pressDurationRange.value = val;
-        saveSettings(settings);
-        applySettings(settings);
-    });
-
-    pressDurationInput.addEventListener('blur', (e) => {
-        let val = parseInt(e.target.value) || 50;
-        val = Math.max(50, Math.min(200, val));
-        e.target.value = val;
-        settings.pressDuration = val;
-        pressDurationRange.value = val;
-        saveSettings(settings);
-        applySettings(settings);
-    });
-
-    excludeChatCb.addEventListener('change', (e) => {
-        settings.excludeChatText = e.target.checked;
-        saveSettings(settings);
-        applySettings(settings);
-    });
-
-    // 点击外部关闭
-    panel.addEventListener('click', (e) => {
-        if (e.target === panel) {
-            panel.classList.remove('open');
-        }
-    });
-
-    document.body.appendChild(panel);
-    return panel;
-}
-
-function toggleSettings() {
-    if (!state.settingsPanel) {
-        state.settingsPanel = createSettingsPanel();
+// 扩展面板动画控制器
+class ExtensionPanelAnimator {
+    constructor() {
+        this.panel = null;
+        this.toggle = null;
+        this.isOpen = false;
+        this.fns = [];
     }
-    state.settingsPanel.classList.toggle('open');
-}
 
-// 注册扩展设置按钮
-function registerSettingsButton() {
-    // 尝试在扩展设置区域添加按钮
-    const addBtn = () => {
-        // 尝试多个可能的容器选择器
-        const selectors = [
-            '#extensions_settings',
-            '#extensions_settings2',
-            '.extensions-settings',
-            '#extension-settings',
-            '.extension-settings',
-            '#settings-container .extensions',
-            '#right-menu .menu-content',
-            '#ui-right-panel',
-            '.drawer-content'
-        ];
-        let container = null;
-        for (const sel of selectors) {
-            container = document.querySelector(sel);
-            if (container) break;
+    init() {
+        // 查找扩展面板和切换按钮
+        this.panel = document.querySelector('#extensions-panel, .extensions-panel, [class*="extensions-panel"]');
+        this.toggle = document.querySelector('#extensions-toggle, .extension-toggle, [class*="third-party"], [title*="扩展"], [title*="extension"]');
+
+        if (!this.panel && !this.toggle) return false;
+
+        // 监听切换按钮点击
+        if (this.toggle) {
+            this.toggle.classList.add('liquid-sanhua-btn');
+            this.toggle.addEventListener('click', () => this.togglePanel(), { passive: true });
         }
-        if (!container) return false;
 
-        // 检查是否已经存在按钮
-        if (container.querySelector('.liquid-settings-trigger')) return true;
+        // 使用 MutationObserver 监听面板状态变化
+        if (this.panel) {
+            this.obs = new MutationObserver((muts) => {
+                for (const m of muts) {
+                    if (m.type === 'attributes' && m.attributeName === 'class') {
+                        const isOpen = this.panel.classList.contains('open') ||
+                            this.panel.classList.contains('active') ||
+                            this.panel.classList.contains('show');
+                        if (isOpen !== this.isOpen) {
+                            this.isOpen = isOpen;
+                            this.animatePanel(isOpen);
+                        }
+                    }
+                }
+            });
+            this.obs.observe(this.panel, { attributes: true, attributeFilter: ['class'] });
+        }
 
-        const btn = document.createElement('div');
-        btn.className = 'liquid-settings-trigger';
-        btn.innerHTML = `
-            <div class="liquid-settings-trigger-inner">
-                <span>💧</span>
-                <span>Liquid UI 设置</span>
-            </div>
-        `;
-        btn.title = '打开 Liquid UI 设置';
-        btn.style.cursor = 'pointer';
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleSettings();
-        });
-
-        container.appendChild(btn);
         return true;
-    };
+    }
 
-    if (!addBtn()) {
-        let attempts = 0;
-        const timer = setInterval(() => {
-            attempts++;
-            if (addBtn() || attempts > 40) {
-                clearInterval(timer);
-            }
-        }, 500);
+    togglePanel() {
+        if (!this.panel) return;
+        this.panel.classList.toggle('open');
+    }
+
+    animatePanel(isOpen) {
+        if (!this.panel) return;
+
+        if (isOpen) {
+            this.panel.classList.remove('closing');
+            this.panel.classList.add('open');
+        } else {
+            this.panel.classList.remove('open');
+            this.panel.classList.add('closing');
+            setTimeout(() => {
+                this.panel.classList.remove('closing');
+            }, 250);
+        }
+    }
+
+    destroy() {
+        this.obs?.disconnect();
+        this.fns.forEach(f => { try { f(); } catch { } });
     }
 }
+
+
+const state = { stream: null, rubber: null, panel: null, page: null, extPanel: null, on: false };
 
 function boot() {
     if (state.on) return;
-
-    // 加载并应用设置
-    state.settings = loadSettings();
-    applySettings(state.settings);
-
     ROOT.classList.add('liquid-ui-enabled');
-    state.click = new ClickManager();
     const pm = new PanelManager();
     if (pm.init()) state.panel = pm;
     else { let r = 0; const i = setInterval(() => { r++; if (pm.init() || r > 60) { state.panel = pm; clearInterval(i); } }, 500); }
@@ -1074,16 +1406,17 @@ function boot() {
     state.rubber.init();
     state.page = new PageTransition();
     state.page.init();
+
+    // 初始化扩展面板动画控制器
+    const epa = new ExtensionPanelAnimator();
+    if (epa.init()) state.extPanel = epa;
+
     STREAM_EVENTS.forEach(n => {
         const es = G.eventSource;
         if (es && typeof es.on === 'function') es.on(n, () => state.stream?.updateState());
         document.addEventListener(n, () => state.stream?.updateState());
     });
     state.on = true;
-
-    // 注册设置按钮
-    registerSettingsButton();
-
     console.info(LOG, 'booted');
 }
 
