@@ -1,1066 +1,203 @@
- /* ============================================
-   Liquid UI - SillyTavern 动画增强插件
-   性能优化版本
-   ============================================ */
-
- :root {
-     /* 贝塞尔曲线 */
-     --liquid-appear: cubic-bezier(0.22, 1, 0.36, 1);
-     --liquid-dismiss: cubic-bezier(0.4, 0, 0.2, 1);
-     --liquid-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-     --liquid-press: cubic-bezier(0.2, 0, 0, 1);
-     --liquid-panel: cubic-bezier(0.16, 1, 0.3, 1);
-     --liquid-bounce: cubic-bezier(0.34, 1.4, 0.64, 1);
-     --liquid-gentle: cubic-bezier(0.4, 0, 0.2, 1);
-
-     /* 动画时长 - 优化版 */
-     --liquid-duration-fast: 120ms;
-     --liquid-duration-normal: 200ms;
-     --liquid-duration-medium: 300ms;
-     --liquid-duration-slow: 400ms;
-     --liquid-duration-modal: 320ms;
-     --liquid-duration-spring: 400ms;
- }
-
- /* ============================================
-   排除第三方插件区域（仅排除过渡，保留动画）
-   注意：不要匹配 SillyTavern 官方的扩展管理界面
-   ============================================ */
- /* 已移除：这些选择器过于宽泛，会影响其他插件的样式 */
- /* 现在只在特定元素上应用liquid动画，而不是全局排除 */
-
- /* ============================================
-   文字逐字显示动画 - 简化版
-   性能优化：减少blur和transform复杂度
-   ============================================ */
- html.liquid-ui-enabled .liquid-char-reveal {
-     display: inline;
-     vertical-align: baseline;
- }
-
- html.liquid-ui-enabled .liquid-char-inner {
-     display: inline;
-     animation: liquid-char-appear 0.32s var(--liquid-appear) both;
-     pointer-events: none;
- }
-
- /* 简化的出现动画 - 移除blur以提升性能 */
- @keyframes liquid-char-appear {
-     0% {
-         opacity: 0;
-         transform: translateY(4px) scale(0.97);
-     }
-
-     40% {
-         opacity: 0.6;
-         transform: translateY(2px) scale(0.99);
-     }
-
-     70% {
-         opacity: 0.9;
-         transform: translateY(0.5px) scale(1.001);
-     }
-
-     100% {
-         opacity: 1;
-         transform: translateY(0) scale(1);
-     }
- }
-
- /* ============================================
-   聊天区域过渡
-   ============================================ */
- html.liquid-ui-enabled #chat {
-     transition: transform var(--liquid-duration-medium) var(--liquid-panel);
-     transform-origin: center center;
-     overscroll-behavior: none;
- }
-
- /* ============================================
-   流式输出光标 - 简化动画
-   ============================================ */
- html.liquid-ui-enabled #chat .mes_text.liquid-cursor::after {
-     content: '●';
-     display: inline-block;
-     margin-left: 0.12em;
-     vertical-align: baseline;
-     font-size: 0.75em;
-     animation: liquid-cursor-pulse 1s var(--liquid-appear) infinite;
- }
-
- @keyframes liquid-cursor-pulse {
-
-     0%,
-     100% {
-         opacity: 0.95;
-         transform: scale(1);
-     }
-
-     50% {
-         opacity: 0.4;
-         transform: scale(0.85);
-     }
- }
-
- /* ============================================
-   统一菜单动画系统 - iOS 风格
-   ============================================ */
-
- /* 菜单动画已禁用，避免影响图标颜色 */
-
-
- /* ============================================
-   统一弹窗动画系统 - iOS 风格
-   ============================================ */
-
- /* 弹窗打开 - 从中心放大 + 淡入
-   注意：只应用于SillyTavern官方弹窗，不应用于第三方插件 */
- html.liquid-ui-enabled .liquid-popup-entrance,
- html.liquid-ui-enabled #dialogue_popup:not(.hidden),
- html.liquid-ui-enabled .dialogue_popup:not(.hidden),
- html.liquid-ui-enabled .ui-dialog:not(.hidden) {
-     animation: liquid-modal-enter 280ms var(--liquid-spring) both;
-     transform-origin: center center;
- }
-
- /* 弹窗关闭 - 向中心缩小 + 淡出 */
- html.liquid-ui-enabled .liquid-popup-exit,
- html.liquid-ui-enabled #dialogue_popup.hidden,
- html.liquid-ui-enabled .dialogue_popup.hidden,
- html.liquid-ui-enabled .ui-dialog.hidden {
-     animation: liquid-modal-exit 200ms var(--liquid-dismiss) both;
-     transform-origin: center center;
-     pointer-events: none;
- }
-
- /* 排除第三方插件的弹窗 */
- html.liquid-ui-enabled .third-party .popup,
- html.liquid-ui-enabled [class*="third-party"] .popup,
- html.liquid-ui-enabled .third-party .modal,
- html.liquid-ui-enabled [class*="third-party"] .modal,
- html.liquid-ui-enabled .extensions-menu .popup,
- html.liquid-ui-enabled .extensions-menu .modal {
-     animation: none !important;
- }
-
- /* 弹窗打开关键帧 */
- @keyframes liquid-modal-enter {
-     0% {
-         opacity: 0;
-         transform: scale(0.85) translateY(20px);
-         filter: blur(4px);
-     }
-
-     50% {
-         opacity: 0.8;
-         transform: scale(1.02) translateY(-2px);
-         filter: blur(0px);
-     }
-
-     100% {
-         opacity: 1;
-         transform: scale(1) translateY(0);
-         filter: blur(0px);
-     }
- }
-
- /* 弹窗关闭关键帧 */
- @keyframes liquid-modal-exit {
-     0% {
-         opacity: 1;
-         transform: scale(1) translateY(0);
-         filter: blur(0px);
-     }
-
-     100% {
-         opacity: 0;
-         transform: scale(0.9) translateY(15px);
-         filter: blur(4px);
-     }
- }
-
- /* 弹窗背景遮罩动画 - 使用独立遮罩层避免层叠问题 */
- html.liquid-ui-enabled .popup:not(.hidden),
- html.liquid-ui-enabled .dialogue_popup:not(.hidden),
- html.liquid-ui-enabled .ui-dialog:not(.hidden),
- html.liquid-ui-enabled .modal:not(.hidden) {
-     position: relative;
- }
-
- html.liquid-ui-enabled .popup:not(.hidden)::before,
- html.liquid-ui-enabled .dialogue_popup:not(.hidden)::before,
- html.liquid-ui-enabled .ui-dialog:not(.hidden)::before,
- html.liquid-ui-enabled .modal:not(.hidden)::before {
-     content: '';
-     position: absolute;
-     inset: -50vmax;
-     background: rgba(0, 0, 0, 0.4);
-     animation: liquid-modal-backdrop-enter 280ms var(--liquid-gentle) forwards;
-     pointer-events: auto;
-     z-index: -1;
- }
-
- @keyframes liquid-modal-backdrop-enter {
-     0% {
-         opacity: 0;
-     }
-
-     100% {
-         opacity: 1;
-     }
- }
-
- /* ============================================
-   消息入场动画 - 简化版
-   ============================================ */
- html.liquid-ui-enabled #chat .apple-entrance {
-     animation: liquid-mes-in var(--liquid-duration-spring) var(--liquid-bounce) both;
-     backface-visibility: hidden;
- }
-
- @keyframes liquid-mes-in {
-     0% {
-         opacity: 0;
-         transform: translateY(12px) scale(0.97);
-     }
-
-     35% {
-         opacity: 0.5;
-         transform: translateY(6px) scale(0.985);
-     }
-
-     65% {
-         opacity: 0.85;
-         transform: translateY(1px) scale(1.002);
-     }
-
-     100% {
-         opacity: 1;
-         transform: translateY(0) scale(1);
-     }
- }
-
- /* ============================================
-   侧边栏动画 - 性能优化
-   ============================================ */
- html.liquid-ui-enabled .liquid-side-panel {
-     position: fixed;
-     top: 0;
-     bottom: 0;
-     z-index: 1000;
-     opacity: 0;
-     visibility: hidden;
-     transition:
-         transform var(--liquid-duration-medium) var(--liquid-dismiss),
-         opacity var(--liquid-duration-medium) var(--liquid-dismiss),
-         visibility 0s var(--liquid-duration-medium);
- }
-
- html.liquid-ui-enabled .liquid-side-panel.liquid-left {
-     left: 0;
-     width: 320px;
-     transform: translateX(-105%);
- }
-
- html.liquid-ui-enabled .liquid-side-panel.liquid-right {
-     right: 0;
-     width: 360px;
-     transform: translateX(105%);
- }
-
- /* 打开状态 */
- html.liquid-ui-enabled .liquid-side-panel.is-open {
-     opacity: 1;
-     visibility: visible;
-     transform: translateX(0);
-     transition:
-         transform var(--liquid-duration-spring) var(--liquid-spring),
-         opacity var(--liquid-duration-medium) var(--liquid-appear),
-         visibility 0s;
- }
-
- /* 关闭状态 */
- html.liquid-ui-enabled .liquid-side-panel.is-closing {
-     opacity: 0;
-     visibility: hidden;
-     transition:
-         transform var(--liquid-duration-medium) var(--liquid-dismiss),
-         opacity 200ms var(--liquid-dismiss),
-         visibility 0s 200ms;
- }
-
- html.liquid-ui-enabled .liquid-side-panel.liquid-left.is-closing {
-     transform: translateX(-105%);
- }
-
- html.liquid-ui-enabled .liquid-side-panel.liquid-right.is-closing {
-     transform: translateX(105%);
- }
-
- /* ============================================
-   侧边栏项目交错入场
-   ============================================ */
- html.liquid-ui-enabled .liquid-side-panel .menu_button,
- html.liquid-ui-enabled .liquid-side-panel .RightPanelBtn,
- html.liquid-ui-enabled .liquid-side-panel .list-group-item,
- html.liquid-ui-enabled .liquid-side-panel .liquid-info-item {
-     opacity: 0;
-     transform: translateY(12px) scale(0.97);
-     transition:
-         opacity var(--liquid-duration-normal) var(--liquid-appear),
-         transform var(--liquid-duration-medium) var(--liquid-spring);
-     transition-delay: var(--liquid-stagger, 50ms);
- }
-
- html.liquid-ui-enabled .liquid-side-panel.is-open .menu_button,
- html.liquid-ui-enabled .liquid-side-panel.is-open .RightPanelBtn,
- html.liquid-ui-enabled .liquid-side-panel.is-open .list-group-item,
- html.liquid-ui-enabled .liquid-side-panel.is-open .liquid-info-item {
-     opacity: 1;
-     transform: translateY(0) scale(1);
- }
-
- /* ============================================
-   聊天区域在侧边栏打开时的缩放
-   ============================================ */
- html.liquid-ui-enabled #chat.when-left-open {
-     transform: translateX(8px) scale(0.995);
- }
-
- html.liquid-ui-enabled #chat.when-right-open {
-     transform: translateX(-8px) scale(0.995);
- }
-
- html.liquid-ui-enabled #chat.when-both-open {
-     transform: scale(0.985);
- }
-
- /* ============================================
-   切换按钮动画
-   ============================================ */
- html.liquid-ui-enabled .liquid-panel-toggle-left.is-active {
-     transform: rotate(90deg) scale(1.05);
-     transition: transform var(--liquid-duration-normal) var(--liquid-spring);
- }
-
- html.liquid-ui-enabled .liquid-panel-toggle-right.is-active {
-     transform: scale(1.08);
-     transition: transform var(--liquid-duration-normal) var(--liquid-spring);
- }
-
- /* ============================================
-   角色头像动画 - 简化版
-   ============================================ */
- html.liquid-ui-enabled .liquid-side-panel.liquid-right.is-open .liquid-character-avatar {
-     animation: liquid-avatar-enter 0.45s var(--liquid-spring) forwards;
-     border-radius: 50%;
- }
-
- @keyframes liquid-avatar-enter {
-     0% {
-         transform: scale(0.7);
-         opacity: 0;
-     }
-
-     50% {
-         transform: scale(1.08);
-         opacity: 0.75;
-     }
-
-     75% {
-         transform: scale(0.97);
-         opacity: 0.95;
-     }
-
-     100% {
-         transform: scale(1);
-         opacity: 1;
-     }
- }
-
- /* ============================================
-   橡皮筋效果
-   ============================================ */
- html.liquid-ui-enabled .liquid-rubber-band {
-     transition: transform 0.1s linear;
- }
-
- /* ============================================
-   聊天记录卡片
-   ============================================ */
- html.liquid-ui-enabled .recentChat {
-     cursor: pointer;
-     border-radius: 12px;
-     position: relative;
-     overflow: hidden;
-     margin-bottom: 8px;
- }
-
- html.liquid-ui-enabled .recentChat.hidden {
-     display: block !important;
-     margin-bottom: 0 !important;
-     opacity: 0 !important;
-     pointer-events: none;
-     transform: scale(0.95) translateY(-10px);
-     height: 0;
-     padding-top: 0;
-     padding-bottom: 0;
-     border: none;
-     transform-origin: top center;
-     transition:
-         margin 180ms var(--liquid-dismiss),
-         height 180ms var(--liquid-dismiss),
-         opacity 150ms var(--liquid-dismiss),
-         transform 180ms var(--liquid-dismiss),
-         padding 180ms var(--liquid-dismiss) !important;
- }
-
- html.liquid-ui-enabled .recentChat:not(.hidden) {
-     height: 72px;
-     max-height: 120px;
-     opacity: 1;
-     transform: scale(1) translateY(0);
-     transition:
-         margin 320ms var(--liquid-spring),
-         height 320ms var(--liquid-spring),
-         opacity 240ms var(--liquid-appear),
-         transform 320ms var(--liquid-spring),
-         padding 320ms var(--liquid-spring) !important;
- }
-
- html.liquid-ui-enabled .recentChat.liquid-pressed {
-     transform: scale(0.97) !important;
-     transition: transform 50ms var(--liquid-press) !important;
- }
-
- /* ============================================
-   点击涟漪效果 - 简化版
-   ============================================ */
- html.liquid-ui-enabled .recentChat .liquid-ripple {
-     position: absolute;
-     border-radius: 50%;
-     background: radial-gradient(circle, rgba(100, 160, 255, 0.2) 0%, transparent 70%);
-     transform: scale(0);
-     animation: liquid-ripple-expand 0.35s var(--liquid-appear) forwards;
-     pointer-events: none;
-     z-index: 5;
- }
-
- @keyframes liquid-ripple-expand {
-     0% {
-         transform: scale(0);
-         opacity: 0.6;
-     }
-
-     50% {
-         transform: scale(1.2);
-         opacity: 0.3;
-     }
-
-     100% {
-         transform: scale(2.5);
-         opacity: 0;
-     }
- }
-
- /* ============================================
-   页面转场动画 - 简化版
-   ============================================ */
- html.liquid-ui-enabled.liquid-page-active>body {
-     transition:
-         transform var(--liquid-duration-slow) var(--liquid-spring),
-         filter var(--liquid-duration-medium) var(--liquid-gentle),
-         border-radius var(--liquid-duration-medium) var(--liquid-gentle);
-     transform-origin: center center;
- }
-
- html.liquid-ui-enabled.liquid-page-shrunk>body {
-     transform: scale(0.92);
-     filter: brightness(0.5) saturate(110%);
-     border-radius: 20px;
-     overflow: hidden;
- }
-
- /* 遮罩层 */
- html.liquid-ui-enabled .liquid-page-scrim {
-     position: fixed;
-     inset: 0;
-     z-index: 9998;
-     pointer-events: none;
-     background: rgba(0, 0, 0, 0);
-     transition: background var(--liquid-duration-medium) var(--liquid-gentle);
- }
-
- html.liquid-ui-enabled .liquid-page-scrim.active {
-     background: rgba(0, 0, 0, 0.5);
- }
-
- html.liquid-ui-enabled .liquid-page-scrim.out {
-     background: rgba(0, 0, 0, 0) !important;
-     transition: background 200ms var(--liquid-dismiss) !important;
- }
-
- /* ============================================
-   Ghost 容器 - 页面转场核心
-   ============================================ */
- html.liquid-ui-enabled .liquid-page-ghost {
-     position: fixed !important;
-     inset: 0 !important;
-     width: 100vw !important;
-     height: 100vh !important;
-     margin: 0 !important;
-     padding: 0 !important;
-     z-index: 10000 !important;
-     pointer-events: none;
-     overflow: hidden;
-     box-sizing: border-box;
-     background: var(--liquid-theme-bg, var(--SmartThemeBlurTintColor, var(--body-bg-color, transparent)));
-     transform-origin: center center;
-     transition:
-         transform var(--liquid-duration-slow) var(--liquid-spring),
-         border-radius var(--liquid-duration-slow) var(--liquid-spring),
-         opacity var(--liquid-duration-normal) var(--liquid-appear);
-     color-scheme: dark light;
-     will-change: transform, opacity;
- }
-
- @media (prefers-color-scheme: light) {
-     html.liquid-ui-enabled .liquid-page-ghost {
-         background: var(--liquid-theme-bg, var(--SmartThemeBlurTintColor, var(--body-bg-color, #f5f5f7)));
-     }
- }
-
- html.liquid-ui-enabled.light .liquid-page-ghost,
- html.liquid-ui-enabled.theme-light .liquid-page-ghost {
-     background: var(--liquid-theme-bg, var(--SmartThemeBlurTintColor, #f5f5f7));
- }
-
- html.liquid-ui-enabled.dark .liquid-page-ghost,
- html.liquid-ui-enabled.theme-dark .liquid-page-ghost {
-     background: var(--liquid-theme-bg, var(--SmartThemeBlurTintColor, #1c1c1e));
- }
-
- html.liquid-ui-enabled .liquid-page-ghost.out {
-     opacity: 0 !important;
-     transition: opacity 200ms var(--liquid-dismiss) !important;
- }
-
- /* Ghost 内部容器 */
- html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-inner {
-     position: absolute;
-     top: 0;
-     left: 0;
-     width: 100%;
-     height: 100%;
-     opacity: 1;
-     transform: translateY(0);
-     transition:
-         opacity var(--liquid-duration-normal) var(--liquid-dismiss),
-         transform var(--liquid-duration-medium) var(--liquid-gentle);
-     color: var(--liquid-theme-text, var(--SmartThemeQuoteColor, #e8e8e8));
-     font-size: 14px;
-     line-height: 1.5;
-     overflow: hidden;
- }
-
- @media (prefers-color-scheme: light) {
-     html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-inner {
-         color: var(--liquid-theme-text, var(--SmartThemeQuoteColor, #1d1d1f));
-     }
- }
-
- html.liquid-ui-enabled .liquid-ghost-content-inv {
-     padding: 20px 24px;
-     width: 100%;
-     height: 100%;
-     box-sizing: border-box;
-     transition: transform var(--liquid-duration-slow) var(--liquid-spring);
-     overflow: hidden;
- }
-
- /* Ghost 标题样式 */
- html.liquid-ui-enabled .liquid-ghost-title {
-     font-weight: 600;
-     font-size: 16px;
-     margin-bottom: 6px;
-     color: var(--liquid-theme-text, inherit);
-     opacity: 0.95;
- }
-
- /* Ghost 预览文字样式 */
- html.liquid-ui-enabled .liquid-ghost-preview {
-     font-size: 13px;
-     opacity: 0.6;
-     overflow: hidden;
-     text-overflow: ellipsis;
-     white-space: nowrap;
-     color: var(--liquid-theme-text, inherit);
- }
-
- html.liquid-ui-enabled .liquid-page-ghost.expanded .liquid-ghost-inner {
-     opacity: 0;
-     transform: translateY(-12px);
- }
-
- /* ============================================
-   Shine 光泽效果 - 简化版
-   ============================================ */
- html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-shine {
-     position: absolute;
-     inset: 0;
-     opacity: 0;
-     background: linear-gradient(125deg,
-             transparent 0%,
-             transparent 40%,
-             rgba(255, 255, 255, 0.04) 50%,
-             transparent 60%,
-             transparent 100%);
-     background-size: 200% 100%;
-     animation: liquid-shine 2s var(--liquid-gentle) infinite;
-     pointer-events: none;
-     transition: opacity 240ms var(--liquid-appear) 100ms;
- }
-
- @media (prefers-color-scheme: light) {
-     html.liquid-ui-enabled .liquid-page-ghost .liquid-ghost-shine {
-         background: linear-gradient(125deg,
-                 transparent 0%,
-                 transparent 40%,
-                 rgba(0, 0, 0, 0.03) 50%,
-                 transparent 60%,
-                 transparent 100%);
-     }
- }
-
- html.liquid-ui-enabled .liquid-page-ghost.expanded .liquid-ghost-shine {
-     opacity: 1;
- }
-
- @keyframes liquid-shine {
-     0% {
-         background-position: 200% 0;
-     }
-
-     100% {
-         background-position: -200% 0;
-     }
- }
-
- /* ============================================
-   卡片动画效果 - GPU 加速优化
-   ============================================ */
- html.liquid-ui-enabled .character_select,
- html.liquid-ui-enabled .char_item,
- html.liquid-ui-enabled .char-grid-item,
- html.liquid-ui-enabled .character-grid-item,
- html.liquid-ui-enabled [data-character-id],
- html.liquid-ui-enabled .chat-card,
- html.liquid-ui-enabled .story-card,
- html.liquid-ui-enabled .scenario-card {
-     cursor: pointer;
-     transition:
-         transform var(--liquid-duration-fast) var(--liquid-spring),
-         filter var(--liquid-duration-fast) var(--liquid-gentle) !important;
-     will-change: transform;
-     backface-visibility: hidden;
-     contain: layout style;
- }
-
- html.liquid-ui-enabled .character_select:hover,
- html.liquid-ui-enabled .char_item:hover,
- html.liquid-ui-enabled .char-grid-item:hover,
- html.liquid-ui-enabled .character-grid-item:hover,
- html.liquid-ui-enabled [data-character-id]:hover,
- html.liquid-ui-enabled .chat-card:hover,
- html.liquid-ui-enabled .story-card:hover,
- html.liquid-ui-enabled .scenario-card:hover {
-     filter: brightness(1.04);
-     transform: translateY(-2px) translate3d(0, 0, 0);
- }
-
- html.liquid-ui-enabled .character_select:active,
- html.liquid-ui-enabled .char_item:active,
- html.liquid-ui-enabled .char-grid-item:active,
- html.liquid-ui-enabled .character-grid-item:active,
- html.liquid-ui-enabled [data-character-id]:active,
- html.liquid-ui-enabled .chat-card:active,
- html.liquid-ui-enabled .story-card:active,
- html.liquid-ui-enabled .scenario-card:active {
-     transform: scale(0.97) translate3d(0, 0, 0) !important;
-     filter: brightness(0.97);
-     transition-duration: 50ms !important;
- }
-
- /* ============================================
-   减少动画偏好
-   ============================================ */
- @media (prefers-reduced-motion: reduce) {
-
-     html.liquid-ui-enabled *,
-     html.liquid-ui-enabled *::before,
-     html.liquid-ui-enabled *::after {
-         animation-duration: 0.01ms !important;
-         animation-iteration-count: 1 !important;
-         transition-duration: 0.01ms !important;
-     }
- }
-
- /* ============================================
-   欢迎页面和最近聊天列表动画
-   ============================================ */
-
- /* 欢迎页面容器 - 淡入 + 下滑动画 */
- html.liquid-ui-enabled #welcome_container,
- html.liquid-ui-enabled .welcome-container,
- html.liquid-ui-enabled [id*="welcome"] {
-     animation: liquid-welcome-enter 0.5s var(--liquid-appear) both;
- }
-
- @keyframes liquid-welcome-enter {
-     0% {
-         opacity: 0;
-         transform: translateY(-20px);
-     }
-
-     100% {
-         opacity: 1;
-         transform: translateY(0);
-     }
- }
-
- /* 最近聊天列表项 - 交错入场动画 */
- html.liquid-ui-enabled .recentChat,
- html.liquid-ui-enabled [class*="recent-chat"],
- html.liquid-ui-enabled .chat-list-item {
-     animation: liquid-recentchat-enter 0.4s var(--liquid-spring) both;
-     animation-delay: calc(var(--item-index, 0) * 60ms);
- }
-
- @keyframes liquid-recentchat-enter {
-     0% {
-         opacity: 0;
-         transform: translateX(-30px) scale(0.95);
-     }
-
-     50% {
-         transform: translateX(5px) scale(1.01);
-     }
-
-     100% {
-         opacity: 1;
-         transform: translateX(0) scale(1);
-     }
- }
-
- /* 三花按钮 - 弹性入场动画（仅针对SillyTavern官方的扩展按钮） */
- html.liquid-ui-enabled #extensions-toggle,
- html.liquid-ui-enabled .menu_button[title*="扩展"],
- html.liquid-ui-enabled .menu_button[title*="extension"] {
-     animation: liquid-sanhua-enter 0.6s var(--liquid-bounce) both;
-     animation-delay: 0.3s;
-     transition: transform var(--liquid-duration-fast) var(--liquid-spring),
-         filter var(--liquid-duration-fast) var(--liquid-gentle);
- }
-
- @keyframes liquid-sanhua-enter {
-     0% {
-         opacity: 0;
-         transform: scale(0) rotate(-180deg);
-     }
-
-     50% {
-         transform: scale(1.2) rotate(10deg);
-     }
-
-     70% {
-         transform: scale(0.95) rotate(-5deg);
-     }
-
-     100% {
-         opacity: 1;
-         transform: scale(1) rotate(0deg);
-     }
- }
-
- /* 三花按钮悬停效果 */
- html.liquid-ui-enabled #extensions-toggle:hover,
- html.liquid-ui-enabled .menu_button[title*="扩展"]:hover,
- html.liquid-ui-enabled .menu_button[title*="extension"]:hover {
-     transform: scale(1.15) rotate(5deg);
-     filter: brightness(1.2);
- }
-
- /* 三花按钮点击效果 */
- html.liquid-ui-enabled #extensions-toggle:active,
- html.liquid-ui-enabled .menu_button[title*="扩展"]:active,
- html.liquid-ui-enabled .menu_button[title*="extension"]:active {
-     transform: scale(0.9) rotate(-5deg);
-     transition-duration: 50ms;
- }
-
- /* 扩展面板展开/收起动画（仅针对SillyTavern官方的扩展面板） */
- html.liquid-ui-enabled #extensions-panel {
-     transition:
-         transform var(--liquid-duration-medium) var(--liquid-panel),
-         opacity var(--liquid-duration-medium) var(--liquid-appear),
-         visibility var(--liquid-duration-medium);
- }
-
- html.liquid-ui-enabled #extensions-panel.open {
-     animation: liquid-panel-expand 0.35s var(--liquid-spring) both;
- }
-
- @keyframes liquid-panel-expand {
-     0% {
-         opacity: 0;
-         transform: translateY(20px) scaleY(0.95);
-         transform-origin: bottom center;
-     }
-
-     100% {
-         opacity: 1;
-         transform: translateY(0) scaleY(1);
-         transform-origin: bottom center;
-     }
- }
-
- /* 扩展面板关闭动画 */
- html.liquid-ui-enabled #extensions-panel.closing {
-     animation: liquid-panel-collapse 0.25s var(--liquid-dismiss) both;
- }
-
- @keyframes liquid-panel-collapse {
-     0% {
-         opacity: 1;
-         transform: translateY(0) scaleY(1);
-         transform-origin: bottom center;
-     }
-
-     100% {
-         opacity: 0;
-         transform: translateY(20px) scaleY(0.95);
-         transform-origin: bottom center;
-     }
- }
-
- /* ============================================
-   设置面板样式
-   ============================================ */
- .liquid-settings-panel {
-     position: fixed;
-     top: 0;
-     right: -380px;
-     width: 380px;
-     height: 100vh;
-     background: var(--SmartThemeBlurTintColor, #1c1c1e);
-     backdrop-filter: blur(20px);
-     -webkit-backdrop-filter: blur(20px);
-     border-left: 1px solid rgba(255, 255, 255, 0.08);
-     z-index: 99999;
-     transition: right var(--liquid-duration-modal) var(--liquid-spring);
-     box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
-     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-     color: var(--SmartThemeQuoteColor, #e8e8e8);
-     box-sizing: border-box;
- }
-
- .liquid-settings-panel.open {
-     right: 0;
- }
-
- .liquid-settings-header {
-     display: flex;
-     align-items: center;
-     justify-content: space-between;
-     padding: 18px 22px;
-     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
- }
-
- .liquid-settings-title {
-     font-size: 18px;
-     font-weight: 600;
-     color: inherit;
-     letter-spacing: -0.02em;
- }
-
- .liquid-settings-close {
-     width: 34px;
-     height: 34px;
-     border: none;
-     background: rgba(255, 255, 255, 0.08);
-     color: inherit;
-     border-radius: 10px;
-     font-size: 22px;
-     cursor: pointer;
-     display: flex;
-     align-items: center;
-     justify-content: center;
-     transition:
-         background var(--liquid-duration-fast) var(--liquid-gentle),
-         transform 60ms var(--liquid-press);
- }
-
- .liquid-settings-close:hover {
-     background: rgba(255, 255, 255, 0.14);
- }
-
- .liquid-settings-close:active {
-     transform: scale(0.92);
- }
-
- .liquid-settings-content {
-     padding: 18px 22px;
-     overflow-y: auto;
-     max-height: calc(100vh - 64px);
- }
-
- .liquid-settings-group {
-     margin-bottom: 18px;
-     padding: 18px;
-     background: rgba(255, 255, 255, 0.04);
-     border-radius: 14px;
-     border: 1px solid rgba(255, 255, 255, 0.04);
- }
-
- .liquid-settings-label {
-     display: flex;
-     align-items: center;
-     gap: 12px;
-     font-size: 14px;
-     font-weight: 500;
-     cursor: pointer;
- }
-
- .liquid-settings-label input[type="checkbox"] {
-     width: 20px;
-     height: 20px;
-     cursor: pointer;
-     accent-color: #0a84ff;
-     border-radius: 4px;
- }
-
- .liquid-settings-label span {
-     flex: 1;
- }
-
- .liquid-settings-desc {
-     margin: 10px 0 0 32px;
-     font-size: 12px;
-     color: rgba(255, 255, 255, 0.45);
-     line-height: 1.45;
- }
-
- .liquid-settings-group input[type="range"] {
-     width: 100%;
-     margin-top: 14px;
-     height: 5px;
-     -webkit-appearance: none;
-     appearance: none;
-     background: rgba(255, 255, 255, 0.15);
-     border-radius: 3px;
-     cursor: pointer;
- }
-
- .liquid-settings-group input[type="range"]::-webkit-slider-thumb {
-     -webkit-appearance: none;
-     appearance: none;
-     width: 20px;
-     height: 20px;
-     background: linear-gradient(135deg, #0a84ff, #0066d6);
-     border-radius: 50%;
-     cursor: pointer;
-     box-shadow: 0 2px 6px rgba(10, 132, 255, 0.35);
- }
-
- .liquid-settings-group input[type="range"]::-webkit-slider-thumb:hover {
-     transform: scale(1.1);
- }
-
- .liquid-settings-group input[type="range"]::-moz-range-thumb {
-     width: 20px;
-     height: 20px;
-     background: linear-gradient(135deg, #0a84ff, #0066d6);
-     border-radius: 50%;
-     cursor: pointer;
-     border: none;
-     box-shadow: 0 2px 6px rgba(10, 132, 255, 0.35);
- }
-
- .liquid-settings-input-wrapper input[type="number"]::-webkit-inner-spin-button,
- .liquid-settings-input-wrapper input[type="number"]::-webkit-outer-spin-button {
-     -webkit-appearance: none;
-     appearance: none;
-     margin: 0;
- }
-
- .liquid-settings-input-wrapper input[type="number"] {
-     -moz-appearance: textfield;
-     appearance: textfield;
- }
-
- .liquid-settings-trigger {
-     padding: 10px 14px;
-     margin: 10px 0;
-     background: linear-gradient(135deg, rgba(10, 132, 255, 0.12), rgba(10, 132, 255, 0.04));
-     border: 1px solid rgba(10, 132, 255, 0.25);
-     border-radius: 12px;
-     cursor: pointer;
-     transition:
-         background var(--liquid-duration-fast) var(--liquid-gentle),
-         transform 60ms var(--liquid-press);
- }
-
- .liquid-settings-trigger:hover {
-     background: linear-gradient(135deg, rgba(10, 132, 255, 0.22), rgba(10, 132, 255, 0.08));
-     box-shadow: 0 4px 12px rgba(10, 132, 255, 0.18);
- }
-
- .liquid-settings-trigger:active {
-     transform: scale(0.97);
- }
-
- .liquid-settings-trigger-inner {
-     display: flex;
-     align-items: center;
-     gap: 10px;
-     font-size: 13px;
-     font-weight: 500;
-     color: var(--SmartThemeQuoteColor, #e8e8e8);
- }
-
- /* ============================================
-   浅色主题适配
-   ============================================ */
- @media (prefers-color-scheme: light) {
-     .liquid-settings-panel {
-         background: var(--SmartThemeBlurTintColor, #f5f5f7);
-         border-left-color: rgba(0, 0, 0, 0.08);
-         box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
-     }
-
-     .liquid-settings-panel,
-     .liquid-settings-panel * {
-         color: #1d1d1f;
-     }
-
-     .liquid-settings-close {
-         background: rgba(0, 0, 0, 0.06);
-     }
-
-     .liquid-settings-close:hover {
-         background: rgba(0, 0, 0, 0.12);
-     }
-
-     .liquid-settings-group {
-         background: rgba(0, 0, 0, 0.03);
-         border-color: rgba(0, 0, 0, 0.04);
-     }
-
-     .liquid-settings-desc {
-         color: rgba(0, 0, 0, 0.5);
-     }
-
-     .liquid-settings-group input[type="range"] {
-         background: rgba(0, 0, 0, 0.12);
-     }
- }
+:root {
+    --liquid-recent-duration: 340ms;
+}
+
+body .welcomePanel .welcomeRecent::after {
+    content: '';
+    display: block;
+    height: var(--liquid-recent-layout-push, 0px);
+    pointer-events: none;
+    transition: height var(--liquid-recent-duration) cubic-bezier(0.2, 0.86, 0.26, 1);
+}
+
+body .welcomePanel.liquid-recent-animating .welcomeRecent .recentChatList .recentChat {
+    transition: opacity var(--liquid-recent-duration) cubic-bezier(0.2, 0.8, 0.2, 1),
+        filter var(--liquid-recent-duration) cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: transform, opacity;
+}
+
+body .welcomePanel.liquid-recent-animating .welcomeRecent .recentChatList .recentChat:not(.liquid-recent-origin-active) {
+    filter: saturate(0.88);
+}
+
+body .welcomePanel.liquid-recent-animating .welcomeRecent .recentChatList .recentChat.liquid-recent-origin-active {
+    opacity: 0;
+}
+
+body #chat.liquid-recent-chat-transitioning > .mes > * {
+    transition: opacity 240ms cubic-bezier(0.2, 0.84, 0.22, 1),
+        filter 240ms cubic-bezier(0.2, 0.84, 0.22, 1);
+    will-change: opacity, filter;
+}
+
+body.liquid-recent-chat-preparing #chat > .mes > * {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    filter: blur(10px);
+    pointer-events: none !important;
+    transition: none !important;
+}
+
+body #chat.liquid-recent-chat-obscured > .mes > * {
+    opacity: 0 !important;
+    filter: blur(10px);
+    pointer-events: none !important;
+}
+
+.liquid-recent-transition-shell {
+    position: fixed;
+    z-index: 2147482000;
+    pointer-events: none;
+    border: 1px solid var(--liquid-recent-border, var(--SmartThemeBorderColor));
+    border-radius: var(--liquid-recent-radius, 10px);
+    background:
+        radial-gradient(circle at 20% 16%, color-mix(in srgb, var(--liquid-recent-accent, var(--SmartThemeQuoteColor)) 14%, transparent), transparent 52%),
+        linear-gradient(to bottom right, color-mix(in srgb, var(--liquid-recent-bg, transparent) 86%, transparent), transparent);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--liquid-recent-border, var(--SmartThemeBorderColor)) 85%, transparent),
+        0 12px 34px color-mix(in srgb, var(--liquid-recent-shadow, rgba(0, 0, 0, 0.5)) 70%, transparent);
+    backdrop-filter: blur(0.5px);
+    overflow: visible;
+}
+
+.liquid-recent-transition-shell::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid color-mix(in srgb, var(--liquid-recent-accent, var(--SmartThemeQuoteColor)) 40%, transparent);
+    opacity: 0.65;
+}
+
+.liquid-recent-transition-shell::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+        120deg,
+        color-mix(in srgb, var(--liquid-recent-accent, var(--SmartThemeQuoteColor)) 8%, transparent) 0%,
+        transparent 35%,
+        color-mix(in srgb, var(--liquid-recent-border, var(--SmartThemeBorderColor)) 22%, transparent) 55%,
+        transparent 100%
+    );
+    mix-blend-mode: screen;
+    opacity: 0.5;
+}
+
+.liquid-recent-transition-glow {
+    position: absolute;
+    inset: -14px;
+    border-radius: inherit;
+    background: radial-gradient(circle at center,
+        color-mix(in srgb, var(--liquid-recent-accent, var(--SmartThemeQuoteColor)) 20%, transparent) 0%,
+        transparent 68%);
+    filter: blur(7px);
+    opacity: 0;
+}
+
+.liquid-recent-transition-content {
+    position: fixed;
+    z-index: 2147482001;
+    pointer-events: none;
+    box-sizing: border-box;
+    overflow: visible;
+}
+
+.liquid-recent-transition-content .liquid-recent-transition-card {
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    width: min(calc(100% - 36px), 540px);
+    height: auto;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 5px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--liquid-recent-radius, 10px);
+    background: transparent !important;
+    cursor: default;
+    overflow: visible;
+}
+
+.liquid-recent-transition-content .liquid-recent-transition-card:hover {
+    background: transparent !important;
+}
+
+.liquid-recent-transition-content .liquid-recent-transition-card .recentChatInfo {
+    min-width: 0;
+    max-width: 100%;
+    align-self: flex-start;
+}
+
+.liquid-recent-transition-content .liquid-recent-transition-card .chatNameContainer,
+.liquid-recent-transition-content .liquid-recent-transition-card .chatMessageContainer {
+    width: 100%;
+    overflow: hidden;
+}
+
+.liquid-recent-transition-content .liquid-recent-transition-card .chatActions {
+    display: none !important;
+}
+
+.liquid-recent-transition-content .liquid-recent-transition-card .liquid-recent-meta-item {
+    opacity: 0;
+    backface-visibility: hidden;
+    will-change: transform, opacity, filter;
+    transform-origin: left center;
+}
+
+.liquid-recent-transition-content .liquid-recent-transition-card .liquid-recent-identity-placeholder {
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+.liquid-recent-identity-flight {
+    position: fixed;
+    z-index: 2147482002;
+    pointer-events: none;
+    margin: 0;
+    transform-origin: top left;
+    backface-visibility: hidden;
+    will-change: transform, opacity, filter;
+}
+
+.liquid-recent-identity-flight > * {
+    max-width: none !important;
+    margin: 0 !important;
+    pointer-events: none;
+}
+
+.liquid-recent-identity-flight-avatar {
+    overflow: hidden;
+}
+
+.liquid-recent-identity-flight-avatar > * {
+    width: 100%;
+    height: 100%;
+}
+
+.liquid-recent-identity-flight-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.liquid-recent-identity-flight-name {
+    display: flex;
+    align-items: center;
+    overflow: visible;
+    white-space: nowrap;
+}
+
+.liquid-recent-identity-flight-name > * {
+    display: block;
+    height: auto;
+}
+
+.liquid-recent-identity-target-hidden {
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
