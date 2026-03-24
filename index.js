@@ -1180,8 +1180,220 @@ function install() {
     }
 
     document.addEventListener('click', onDocumentClickCapture, true);
+    document.addEventListener('click', onShowMoreChatsClick, true);
     isInstalled = true;
     console.debug(`${EXTENSION_TAG} installed`);
+}
+
+/**
+ * @param {MouseEvent} event
+ */
+function onShowMoreChatsClick(event) {
+    const button = event.target;
+    if (!(button instanceof HTMLElement)) {
+        return;
+    }
+
+    const showMoreBtn = button.closest('button.showMoreChats');
+    if (!(showMoreBtn instanceof HTMLElement)) {
+        return;
+    }
+
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        return;
+    }
+
+    const list = showMoreBtn.closest('.recentChatList');
+    if (!(list instanceof HTMLElement)) {
+        return;
+    }
+
+    const isCollapsing = showMoreBtn.classList.contains('rotated');
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (isCollapsing) {
+        collapseRecentChats(list, showMoreBtn);
+    } else {
+        expandRecentChats(list, showMoreBtn);
+    }
+}
+
+/**
+ * @param {HTMLElement} list
+ * @param {HTMLElement} showMoreBtn
+ */
+function expandRecentChats(list, showMoreBtn) {
+    const expandDuration = 660;
+    const expandOffsetY = 6;
+    const accordionEasing = 'cubic-bezier(0.16, 0.92, 0.24, 1)';
+
+    const hiddenItems = Array.from(list.querySelectorAll(':scope > .recentChat.hidden'));
+    if (!hiddenItems.length) {
+        return;
+    }
+
+    const startHeight = list.getBoundingClientRect().height;
+    list.style.height = `${startHeight}px`;
+    list.style.overflow = 'hidden';
+
+    hiddenItems.forEach(el => {
+        el.classList.add('liquid-showmore-revealed');
+        el.classList.remove('hidden');
+        el.style.opacity = '0';
+        el.style.transform = `translateY(-${expandOffsetY}px)`;
+    });
+
+    const targetHeight = list.scrollHeight;
+
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            const animations = [];
+            animations.push(list.animate(
+                [
+                    { height: `${startHeight}px` },
+                    { height: `${targetHeight}px` },
+                ],
+                {
+                    duration: expandDuration,
+                    easing: accordionEasing,
+                    fill: 'forwards',
+                },
+            ));
+
+            hiddenItems.forEach((el, index) => {
+                const animation = el.animate(
+                    [
+                        {
+                            opacity: 0,
+                            transform: `translateY(-${expandOffsetY}px)`,
+                            offset: 0,
+                        },
+                        {
+                            opacity: 1,
+                            transform: 'translateY(0px)',
+                            offset: 1,
+                        },
+                    ],
+                    {
+                        duration: expandDuration,
+                        delay: index * 32,
+                        easing: accordionEasing,
+                        fill: 'forwards',
+                    },
+                );
+
+                animations.push(animation);
+            });
+
+            showMoreBtn.classList.add('rotated');
+            showMoreBtn.setAttribute('title', 'Show less recent chats');
+
+            Promise.allSettled(animations.map(a => a.finished.catch(() => undefined))).then(() => {
+                list.style.height = '';
+                list.style.overflow = '';
+                hiddenItems.forEach(el => {
+                    el.style.opacity = '';
+                    el.style.transform = '';
+                });
+            });
+        });
+    });
+}
+
+/**
+ * @param {HTMLElement} list
+ * @param {HTMLElement} showMoreBtn
+ */
+function collapseRecentChats(list, showMoreBtn) {
+    const revealedItems = Array.from(list.querySelectorAll(':scope > .recentChat.liquid-showmore-revealed'));
+    if (!revealedItems.length) {
+        return;
+    }
+
+    const collapseDuration = 500;
+    const collapseOffsetY = 6;
+    const accordionEasing = 'cubic-bezier(0.16, 0.92, 0.24, 1)';
+    const listGap = parseFloat(window.getComputedStyle(list).gap || '0') || 0;
+    const startHeight = list.getBoundingClientRect().height;
+    let removedHeight = revealedItems.length * listGap;
+
+    revealedItems.forEach(el => {
+        const currentHeight = el.scrollHeight || 200;
+        removedHeight += el.getBoundingClientRect().height || currentHeight;
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0px)';
+    });
+
+    const targetHeight = Math.max(0, startHeight - removedHeight);
+    list.style.height = `${startHeight}px`;
+    list.style.overflow = 'hidden';
+
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            const animations = [];
+            animations.push(list.animate(
+                [
+                    { height: `${startHeight}px` },
+                    { height: `${targetHeight}px` },
+                ],
+                {
+                    duration: collapseDuration,
+                    easing: accordionEasing,
+                    fill: 'forwards',
+                },
+            ));
+
+            revealedItems.forEach((el, index) => {
+                const animation = el.animate(
+                    [
+                        {
+                            opacity: 1,
+                            transform: 'translateY(0px)',
+                            offset: 0,
+                        },
+                        {
+                            opacity: 0,
+                            transform: `translateY(-${collapseOffsetY}px)`,
+                            offset: 1,
+                        },
+                    ],
+                    {
+                        duration: collapseDuration,
+                        delay: (revealedItems.length - 1 - index) * 16,
+                        easing: accordionEasing,
+                        fill: 'forwards',
+                    },
+                );
+
+                animations.push(animation);
+            });
+
+            showMoreBtn.classList.remove('rotated');
+            showMoreBtn.setAttribute('title', 'Show more recent chats');
+
+            Promise.allSettled(animations.map(a => a.finished.catch(() => undefined))).then(() => {
+                revealedItems.forEach(el => {
+                    el.style.opacity = '0';
+                    el.style.transform = `translateY(-${collapseOffsetY}px)`;
+                });
+
+                requestAnimationFrame(() => {
+                    revealedItems.forEach(el => {
+                        el.classList.add('hidden');
+                        el.classList.remove('liquid-showmore-revealed');
+                        el.style.opacity = '';
+                        el.style.transform = '';
+                    });
+
+                    list.style.height = '';
+                    list.style.overflow = '';
+                });
+            });
+        });
+    });
 }
 
 if (document.readyState === 'loading') {
