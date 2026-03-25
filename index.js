@@ -10,6 +10,27 @@ const IDENTITY_ENTER_DURATION_MS = 360;
 const META_ENTER_DURATION_MS = 240;
 const META_STAGGER_MS = 68;
 const EMPTY_EXIT_DURATION_MS = 280;
+const MINUTE_MS = 60 * 1000;
+const EYE_CARE_INTERVAL_MS = 20 * MINUTE_MS;
+const POSTURE_INTERVAL_MS = 30 * MINUTE_MS;
+const ACTIVE_IDLE_TIMEOUT_MS = 60 * 1000;
+const REMINDER_TICK_MS = 1000;
+const REMINDER_AUTO_HIDE_MS = 18000;
+const REMINDER_SNOOZE_MS = 5 * MINUTE_MS;
+const WEATHER_CACHE_MS = 90 * MINUTE_MS;
+const HOLIDAY_API_TIMEOUT_MS = 8000;
+const WELCOME_CHECK_INTERVAL_MS = 500;
+const WELCOME_CHECK_TIMEOUT_MS = 12000;
+const DISABLED_DAY_STORAGE_KEY = 'st-liquid-ui-reminder-disabled-day-v4';
+const REMINDER_SNOOZE_STORAGE_KEY = 'st-liquid-ui-reminder-snooze-until-v2';
+const REMINDER_STORAGE_KEYS = [
+    'st-liquid-ui-reminder-disabled-day',
+    'st-liquid-ui-reminder-disabled-day-v2',
+    'st-liquid-ui-reminder-disabled-day-v3',
+    'st-liquid-ui-reminder-snooze-until',
+    'st-liquid-ui-reminder-snooze-until-v2',
+    'st-liquid-ui-reminder-disabled-day-v4',
+];
 
 const BODY_CHAT_PREPARING_CLASS = 'liquid-recent-chat-preparing';
 
@@ -17,6 +38,27 @@ let isInstalled = false;
 let isTransitioning = false;
 /** @type {HTMLElement | null} */
 let bypassCard = null;
+let reminderIsland = null;
+let reminderTitle = null;
+let reminderMessage = null;
+let reminderMeta = null;
+let reminderTimerId = 0;
+let reminderHideTimer = 0;
+let activeUsageMs = 0;
+let dailyUsageMs = 0;
+let usageDayStamp = new Date().toDateString();
+let lastTickAt = Date.now();
+let lastActivityAt = Date.now();
+let nextEyeReminderAt = EYE_CARE_INTERVAL_MS;
+let nextPostureReminderAt = POSTURE_INTERVAL_MS;
+let snoozeUntil = Number.parseInt(localStorage.getItem(REMINDER_SNOOZE_STORAGE_KEY) || '0', 10) || 0;
+let remindersDisabledForToday = localStorage.getItem(DISABLED_DAY_STORAGE_KEY) === usageDayStamp;
+let weatherPromise = null;
+let cachedWeather = null;
+let hasShownWelcomeIsland = false;
+let holidayPromise = null;
+let welcomeCheckTimerId = 0;
+let welcomeCheckStartedAt = 0;
 
 function emptyTransition() {
     return {
@@ -27,6 +69,685 @@ function emptyTransition() {
 
 function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function clearReminderHideTimer() {
+    if (reminderHideTimer) {
+        window.clearTimeout(reminderHideTimer);
+        reminderHideTimer = 0;
+    }
+}
+
+function cleanupReminderStorage() {
+    try {
+        REMINDER_STORAGE_KEYS.forEach(key => {
+            if (key !== DISABLED_DAY_STORAGE_KEY && key !== REMINDER_SNOOZE_STORAGE_KEY) {
+                localStorage.removeItem(key);
+            }
+        });
+
+        const storedDisabledDay = localStorage.getItem(DISABLED_DAY_STORAGE_KEY);
+        if (storedDisabledDay && storedDisabledDay !== new Date().toDateString()) {
+            localStorage.removeItem(DISABLED_DAY_STORAGE_KEY);
+        }
+
+        const storedSnoozeUntil = Number.parseInt(localStorage.getItem(REMINDER_SNOOZE_STORAGE_KEY) || '0', 10) || 0;
+        if (storedSnoozeUntil > 0 && storedSnoozeUntil <= Date.now()) {
+            localStorage.removeItem(REMINDER_SNOOZE_STORAGE_KEY);
+        }
+    } catch {
+        // Ignore storage cleanup failures.
+    }
+}
+
+function syncUsageDay() {
+    const today = new Date().toDateString();
+    if (usageDayStamp === today) {
+        return;
+    }
+
+    usageDayStamp = today;
+    dailyUsageMs = 0;
+    remindersDisabledForToday = localStorage.getItem(DISABLED_DAY_STORAGE_KEY) === today;
+}
+
+function isReminderDisabledToday() {
+    syncUsageDay();
+    return remindersDisabledForToday;
+}
+
+function setReminderDisabledToday() {
+    remindersDisabledForToday = true;
+    try {
+        localStorage.setItem(DISABLED_DAY_STORAGE_KEY, usageDayStamp);
+    } catch {
+        // Ignore storage write failures.
+    }
+    hideReminderIsland();
+}
+
+function persistSnoozeUntil(value) {
+    snoozeUntil = value;
+
+    try {
+        if (value > 0) {
+            localStorage.setItem(REMINDER_SNOOZE_STORAGE_KEY, String(value));
+        } else {
+            localStorage.removeItem(REMINDER_SNOOZE_STORAGE_KEY);
+        }
+    } catch {
+        // Ignore storage write failures.
+    }
+}
+
+function markUserActivity() {
+    lastActivityAt = Date.now();
+}
+
+function formatDuration(ms) {
+    const totalMinutes = Math.max(1, Math.floor(ms / MINUTE_MS));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    if (hours <= 0) {
+        return `${totalMinutes} 分钟`;
+    }
+
+    if (minutes <= 0) {
+        return `${hours} 小时`;
+    }
+
+    return `${hours} 小时 ${minutes} 分钟`;
+}
+
+function getTimeGreeting(date = new Date()) {
+    const hour = date.getHours();
+
+    if (hour >= 5 && hour < 11) {
+        return '早上好';
+    }
+
+    if (hour >= 11 && hour < 14) {
+        return '中午好';
+    }
+
+    if (hour >= 14 && hour < 18) {
+        return '下午好';
+    }
+
+    if (hour >= 18 && hour < 23) {
+        return '晚上好';
+    }
+
+    return '夜深了';
+}
+
+function getPositiveHolidayGreeting(date = new Date()) {
+    const monthDay = `${date.getMonth() + 1}-${date.getDate()}`;
+    const solarHolidays = new Map([
+        ['1-1', '元旦快乐'],
+        ['10-1', '国庆快乐'],
+    ]);
+
+    return solarHolidays.get(monthDay) || '';
+}
+
+function getHolidayWhitelist() {
+    return new Map([
+        ['元旦节', '元旦快乐'],
+        ['元旦', '元旦快乐'],
+        ['春节', '春节快乐'],
+        ['元宵节', '元宵节快乐'],
+        ['端午节', '端午安康'],
+        ['中秋节', '中秋快乐'],
+        ['国庆节', '国庆快乐'],
+    ]);
+}
+
+function getWeatherLabel(weatherCode) {
+    const tone = getWeatherTone(weatherCode);
+
+    if (tone === 'sunny') {
+        return '晴';
+    }
+
+    if (tone === 'rainy') {
+        return '雨';
+    }
+
+    if (tone === 'snowy') {
+        return '雪';
+    }
+
+    if (tone === 'stormy') {
+        return '强对流';
+    }
+
+    return '阴';
+}
+
+function getWeatherActivitySuggestion(weather) {
+    if (!weather) {
+        return '愿好运与你常在。今天也别忘了适时活动和补水。';
+    }
+
+    const tone = getWeatherTone(weather.weatherCode);
+    const isDaytime = Boolean(weather.isDay);
+
+    if (tone === 'sunny') {
+        if (isDaytime) {
+            return '愿好运与你常在。今天天气舒服，适合出去散散步，顺便晒晒太阳。';
+        }
+
+        return '愿好运与你常在。今晚天气还算舒服，适合短暂透透气，也别忘了早点休息。';
+    }
+
+    if (tone === 'cloudy') {
+        if (isDaytime) {
+            return '愿好运与你常在。阴天也适合慢走几步，透透气，活动一下肩颈。';
+        }
+
+        return '愿好运与你常在。今晚更适合放松一下，做些轻度活动，舒缓肩颈和眼睛。';
+    }
+
+    if (tone === 'rainy') {
+        if (isDaytime) {
+            return '愿好运与你常在。下雨天记得带伞，适合做些室内活动，顺便喝口热水。';
+        }
+
+        return '愿好运与你常在。夜里下雨更适合待在室内，记得保暖，也可以喝点热饮放松一下。';
+    }
+
+    if (tone === 'snowy') {
+        if (isDaytime) {
+            return '愿好运与你常在。下雪天注意保暖和防滑，出门记得放慢脚步。';
+        }
+
+        return '愿好运与你常在。雪夜路滑，今晚更适合待在温暖的室内，好好休息。';
+    }
+
+    if (isDaytime) {
+        return '愿好运与你常在。外面天气不太稳定，今天更适合在室内活动、补水和适时休息。';
+    }
+
+    return '愿好运与你常在。今晚天气不太稳定，尽量减少外出，放松一下，早点休息。';
+}
+
+function getWeatherMeta(weather) {
+    if (!weather) {
+        return '欢迎来到酒馆';
+    }
+
+    const temperature = typeof weather.temperature === 'number' ? `${Math.round(weather.temperature)}°C` : '--';
+    const windSpeed = typeof weather.windSpeed === 'number' ? `${weather.windSpeed.toFixed(1)} m/s` : '--';
+    return `${temperature} · ${getWeatherLabel(weather.weatherCode)} · 风速 ${windSpeed}`;
+}
+
+function getWelcomePayload(weather) {
+    const holidayGreeting = '';
+    const title = holidayGreeting ? `${getTimeGreeting()} · ${holidayGreeting}` : getTimeGreeting();
+
+    return {
+        mode: 'welcome',
+        title,
+        message: getWeatherActivitySuggestion(weather),
+        meta: getWeatherMeta(weather),
+    };
+}
+
+function withTimeout(promise, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error('timeout')), timeoutMs);
+        promise
+            .then(value => {
+                window.clearTimeout(timer);
+                resolve(value);
+            })
+            .catch(error => {
+                window.clearTimeout(timer);
+                reject(error);
+            });
+    });
+}
+
+async function fetchHolidayGreeting(date = new Date()) {
+    const fallbackGreeting = getPositiveHolidayGreeting(date);
+    const dateStamp = date.toISOString().slice(0, 10);
+    const whitelist = getHolidayWhitelist();
+
+    try {
+        const response = await withTimeout(fetch(`https://timor.tech/api/holiday/info/${dateStamp}`, { method: 'GET' }), HOLIDAY_API_TIMEOUT_MS);
+        if (!response.ok) {
+            throw new Error(`holiday request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const holidayName = data?.holiday?.name;
+        if (typeof holidayName === 'string' && whitelist.has(holidayName)) {
+            return whitelist.get(holidayName) || '';
+        }
+    } catch (error) {
+        console.debug(`${EXTENSION_TAG} holiday unavailable`, error);
+    }
+
+    return fallbackGreeting;
+}
+
+async function getHolidayGreetingOnce() {
+    if (holidayPromise) {
+        return holidayPromise;
+    }
+
+    holidayPromise = fetchHolidayGreeting().finally(() => {
+        holidayPromise = null;
+    });
+
+    return holidayPromise;
+}
+
+function isOnHomepage() {
+    const welcomePanel = document.querySelector('.welcomePanel');
+    if (!(welcomePanel instanceof HTMLElement)) {
+        return false;
+    }
+
+    const style = window.getComputedStyle(welcomePanel);
+    if (style.display === 'none' || style.visibility === 'hidden') {
+        return false;
+    }
+
+    const rect = welcomePanel.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+}
+
+function getWeatherTone(weatherCode) {
+    const sunnyCodes = new Set([0, 1]);
+    const mixedCodes = new Set([2]);
+    const rainyCodes = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82]);
+    const snowyCodes = new Set([71, 73, 75, 77, 85, 86]);
+    const stormCodes = new Set([95, 96, 99]);
+
+    if (sunnyCodes.has(weatherCode) || mixedCodes.has(weatherCode)) {
+        return 'sunny';
+    }
+
+    if (rainyCodes.has(weatherCode)) {
+        return 'rainy';
+    }
+
+    if (snowyCodes.has(weatherCode)) {
+        return 'snowy';
+    }
+
+    if (stormCodes.has(weatherCode)) {
+        return 'stormy';
+    }
+
+    return 'cloudy';
+}
+
+function getWeatherMessage(weather) {
+    const duration = formatDuration(activeUsageMs);
+    const dailyTotal = formatDuration(dailyUsageMs);
+
+    if (!weather) {
+        return `你已经连续使用 ${duration} 了，今天累计使用 ${dailyTotal}，建议起来活动一下，顺便喝口水。`;
+    }
+
+    const tone = getWeatherTone(weather.weatherCode);
+
+    if (tone === 'sunny') {
+        return `你已经连续使用 ${duration} 了，今天累计使用 ${dailyTotal}，外面天气不错，建议出去走走，顺便喝口水。`;
+    }
+
+    if (tone === 'rainy' || tone === 'snowy' || tone === 'stormy') {
+        return `你已经连续使用 ${duration} 了，今天累计使用 ${dailyTotal}，外面天气一般，先起来活动活动，拉伸一下，再喝口水吧。`;
+    }
+
+    return `你已经连续使用 ${duration} 了，今天累计使用 ${dailyTotal}，建议离开屏幕走几步，活动肩颈，再补充一点水分。`;
+}
+
+function getReminderPayload(type, weather) {
+    const duration = formatDuration(activeUsageMs);
+
+    if (type === 'combined') {
+        return {
+            mode: 'combined',
+            title: '休息一下',
+            message: `${getWeatherMessage(weather)} 也别忘了做一次 20-20-20 护眼：看向 20 英尺外 20 秒。`,
+            meta: `已连续活跃 ${duration} · 今日累计 ${formatDuration(dailyUsageMs)}`,
+        };
+    }
+
+    if (type === 'eye') {
+        return {
+            mode: 'eye',
+            title: '20-20-20 护眼提醒',
+            message: `你已经连续看屏幕 ${duration} 了，今天累计使用 ${formatDuration(dailyUsageMs)}，看看 20 英尺外至少 20 秒，让眼睛放松一下。`,
+            meta: `每 20 分钟循环提醒 · 今日累计 ${formatDuration(dailyUsageMs)}`,
+        };
+    }
+
+    return {
+        mode: 'posture',
+        title: '起身走走',
+        message: getWeatherMessage(weather),
+        meta: `已连续活跃 ${duration} · 今日累计 ${formatDuration(dailyUsageMs)}`,
+    };
+}
+
+function hideReminderIsland(immediate = false) {
+    if (!(reminderIsland instanceof HTMLElement)) {
+        return;
+    }
+
+    clearReminderHideTimer();
+    reminderIsland.classList.toggle('liquid-reminder-visible', false);
+    reminderIsland.classList.toggle('liquid-reminder-hiding', !immediate);
+
+    if (immediate) {
+        reminderIsland.classList.remove('liquid-reminder-hiding');
+    }
+}
+
+function showReminderIsland(payload) {
+    if (!(reminderIsland instanceof HTMLElement) || !(reminderTitle instanceof HTMLElement) || !(reminderMessage instanceof HTMLElement) || !(reminderMeta instanceof HTMLElement)) {
+        return;
+    }
+
+    reminderTitle.textContent = payload.title;
+    reminderMessage.textContent = payload.message;
+    reminderMeta.textContent = payload.meta;
+    reminderIsland.dataset.mode = payload.mode || 'default';
+    reminderIsland.classList.remove('liquid-reminder-hiding');
+    reminderIsland.classList.remove('liquid-reminder-visible');
+    void reminderIsland.offsetWidth;
+    reminderIsland.classList.add('liquid-reminder-visible');
+
+    clearReminderHideTimer();
+    reminderHideTimer = window.setTimeout(() => {
+        hideReminderIsland();
+    }, REMINDER_AUTO_HIDE_MS);
+}
+
+function createReminderIsland() {
+    if (reminderIsland instanceof HTMLElement) {
+        return reminderIsland;
+    }
+
+    const island = document.createElement('section');
+    island.className = 'liquid-reminder-island';
+    island.setAttribute('role', 'status');
+    island.setAttribute('aria-live', 'polite');
+
+    island.innerHTML = `
+        <div class="liquid-reminder-body">
+            <div class="liquid-reminder-copy">
+                <div class="liquid-reminder-title"></div>
+                <div class="liquid-reminder-message"></div>
+                <div class="liquid-reminder-meta"></div>
+            </div>
+            <div class="liquid-reminder-actions">
+                <button type="button" class="menu_button liquid-reminder-action" data-action="snooze">5 分钟后</button>
+                <button type="button" class="menu_button liquid-reminder-action" data-action="disable">今天不再提醒</button>
+                <button type="button" class="menu_button liquid-reminder-close" data-action="close" aria-label="关闭提醒">×</button>
+            </div>
+        </div>
+    `;
+
+    island.addEventListener('pointerenter', clearReminderHideTimer);
+    island.addEventListener('pointerleave', () => {
+        clearReminderHideTimer();
+        reminderHideTimer = window.setTimeout(() => hideReminderIsland(), REMINDER_AUTO_HIDE_MS / 2);
+    });
+    island.addEventListener('click', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+
+        const action = target.closest('[data-action]')?.getAttribute('data-action');
+
+        if (action === 'snooze') {
+            persistSnoozeUntil(Date.now() + REMINDER_SNOOZE_MS);
+            hideReminderIsland();
+            return;
+        }
+
+        if (action === 'disable') {
+            setReminderDisabledToday();
+            return;
+        }
+
+        if (action === 'close') {
+            hideReminderIsland();
+        }
+    });
+
+    document.body.appendChild(island);
+    reminderIsland = island;
+    reminderTitle = island.querySelector('.liquid-reminder-title');
+    reminderMessage = island.querySelector('.liquid-reminder-message');
+    reminderMeta = island.querySelector('.liquid-reminder-meta');
+    return island;
+}
+
+function getCurrentPosition() {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error('geolocation unavailable'));
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: false,
+            timeout: 10000,
+            maximumAge: WEATHER_CACHE_MS,
+        });
+    });
+}
+
+async function fetchWeatherContext() {
+    const now = Date.now();
+    if (cachedWeather && now - cachedWeather.fetchedAt < WEATHER_CACHE_MS) {
+        return cachedWeather;
+    }
+
+    const position = await getCurrentPosition();
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+    const url = new URL('https://api.open-meteo.com/v1/forecast');
+    url.searchParams.set('latitude', String(latitude));
+    url.searchParams.set('longitude', String(longitude));
+    url.searchParams.set('current', 'weather_code,temperature_2m,is_day,wind_speed_10m');
+    url.searchParams.set('timezone', 'auto');
+
+    const response = await fetch(url.toString(), { method: 'GET' });
+    if (!response.ok) {
+        throw new Error(`weather request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const current = data?.current;
+
+    if (!current || typeof current.weather_code !== 'number') {
+        throw new Error('weather payload missing current data');
+    }
+
+    cachedWeather = {
+        weatherCode: current.weather_code,
+        temperature: current.temperature_2m,
+        windSpeed: current.wind_speed_10m,
+        isDay: current.is_day,
+        fetchedAt: now,
+    };
+
+    return cachedWeather;
+}
+
+async function getWeatherContextOnce() {
+    if (cachedWeather && Date.now() - cachedWeather.fetchedAt < WEATHER_CACHE_MS) {
+        return cachedWeather;
+    }
+
+    if (weatherPromise) {
+        return weatherPromise;
+    }
+
+    weatherPromise = fetchWeatherContext()
+        .catch(error => {
+            console.debug(`${EXTENSION_TAG} weather unavailable`, error);
+            return null;
+        })
+        .finally(() => {
+            weatherPromise = null;
+        });
+
+    return weatherPromise;
+}
+
+async function triggerReminder(type) {
+    createReminderIsland();
+
+    const needsWeather = type === 'posture' || type === 'combined';
+    const weather = needsWeather ? await getWeatherContextOnce() : null;
+    const payload = getReminderPayload(type, weather);
+    showReminderIsland(payload);
+}
+
+async function maybeShowWelcomeIsland() {
+    if (hasShownWelcomeIsland || !isOnHomepage()) {
+        return;
+    }
+
+    hasShownWelcomeIsland = true;
+    createReminderIsland();
+
+    const [weather, holidayGreeting] = await Promise.all([
+        getWeatherContextOnce().catch(() => null),
+        getHolidayGreetingOnce().catch(() => ''),
+    ]);
+
+    const payload = getWelcomePayload(weather);
+    if (holidayGreeting) {
+        payload.title = `${payload.title} · ${holidayGreeting}`;
+    }
+
+    showReminderIsland(payload);
+}
+
+function clearWelcomeIslandCheck() {
+    if (welcomeCheckTimerId) {
+        window.clearInterval(welcomeCheckTimerId);
+        welcomeCheckTimerId = 0;
+    }
+}
+
+function scheduleWelcomeIslandCheck() {
+    if (hasShownWelcomeIsland || welcomeCheckTimerId) {
+        return;
+    }
+
+    welcomeCheckStartedAt = Date.now();
+    welcomeCheckTimerId = window.setInterval(() => {
+        if (hasShownWelcomeIsland) {
+            clearWelcomeIslandCheck();
+            return;
+        }
+
+        if (Date.now() - welcomeCheckStartedAt >= WELCOME_CHECK_TIMEOUT_MS) {
+            clearWelcomeIslandCheck();
+            return;
+        }
+
+        if (!isOnHomepage()) {
+            return;
+        }
+
+        clearWelcomeIslandCheck();
+        maybeShowWelcomeIsland().catch(error => {
+            console.debug(`${EXTENSION_TAG} welcome island failed`, error);
+        });
+    }, WELCOME_CHECK_INTERVAL_MS);
+}
+
+function advanceReminderThresholds(nowMs) {
+    while (nextEyeReminderAt <= nowMs) {
+        nextEyeReminderAt += EYE_CARE_INTERVAL_MS;
+    }
+
+    while (nextPostureReminderAt <= nowMs) {
+        nextPostureReminderAt += POSTURE_INTERVAL_MS;
+    }
+}
+
+async function evaluateReminders() {
+    if (isReminderDisabledToday()) {
+        hideReminderIsland(true);
+        return;
+    }
+
+    if (snoozeUntil > Date.now()) {
+        return;
+    }
+
+    if (snoozeUntil > 0) {
+        persistSnoozeUntil(0);
+    }
+
+    const dueEye = activeUsageMs >= nextEyeReminderAt;
+    const duePosture = activeUsageMs >= nextPostureReminderAt;
+
+    if (!dueEye && !duePosture) {
+        return;
+    }
+
+    const type = dueEye && duePosture ? 'combined' : duePosture ? 'posture' : 'eye';
+    advanceReminderThresholds(activeUsageMs);
+    await triggerReminder(type);
+}
+
+async function reminderTick() {
+    syncUsageDay();
+    const now = Date.now();
+    const delta = Math.max(0, now - lastTickAt);
+    lastTickAt = now;
+
+    const isVisible = !document.hidden;
+    const isActive = isVisible && now - lastActivityAt <= ACTIVE_IDLE_TIMEOUT_MS;
+
+    if (isActive) {
+        activeUsageMs += delta;
+        dailyUsageMs += delta;
+        await evaluateReminders();
+    }
+}
+
+function installReminderIsland() {
+    cleanupReminderStorage();
+    createReminderIsland();
+    markUserActivity();
+
+    ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart'].forEach(eventName => {
+        document.addEventListener(eventName, markUserActivity, { passive: true });
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        lastTickAt = Date.now();
+        if (!document.hidden) {
+            markUserActivity();
+        }
+    });
+
+    if (!reminderTimerId) {
+        reminderTimerId = window.setInterval(() => {
+            reminderTick().catch(error => {
+                console.debug(`${EXTENSION_TAG} reminder tick failed`, error);
+            });
+        }, REMINDER_TICK_MS);
+    }
+
+    scheduleWelcomeIslandCheck();
 }
 
 function nextFrame() {
@@ -1181,6 +1902,7 @@ function install() {
 
     document.addEventListener('click', onDocumentClickCapture, true);
     document.addEventListener('click', onShowMoreChatsClick, true);
+    installReminderIsland();
     isInstalled = true;
     console.debug(`${EXTENSION_TAG} installed`);
 }

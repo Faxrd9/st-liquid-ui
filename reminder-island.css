@@ -1,0 +1,742 @@
+:root {
+    --liquid-reminder-width: min(700px, calc(100vw - 24px));
+    --liquid-reminder-height: 122px;
+    --liquid-reminder-collapsed-width: 146px;
+    --liquid-reminder-collapsed-height: 36px;
+    --liquid-reminder-surface: rgba(7, 7, 10, 0.94);
+    --liquid-reminder-surface-2: rgba(19, 19, 24, 0.92);
+    --liquid-reminder-border: rgba(255, 255, 255, 0.08);
+    --liquid-reminder-highlight: rgba(255, 255, 255, 0.12);
+    --liquid-reminder-copy: rgba(248, 248, 252, 0.98);
+    --liquid-reminder-copy-muted: rgba(214, 214, 222, 0.72);
+    --liquid-reminder-action-bg: rgba(255, 255, 255, 0.07);
+    --liquid-reminder-action-border: rgba(255, 255, 255, 0.1);
+    --liquid-reminder-shadow: 0 28px 74px rgba(0, 0, 0, 0.42);
+}
+
+.liquid-reminder-island {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) - 6px);
+    left: 50%;
+    z-index: 2147482500;
+    width: 8px;
+    min-height: 8px;
+    padding: 0;
+    border: 1px solid var(--liquid-reminder-border);
+    border-radius: 999px;
+    background:
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.1), transparent 26%),
+        radial-gradient(circle at 84% 18%, rgba(91, 136, 255, 0.12), transparent 22%),
+        linear-gradient(180deg, var(--liquid-reminder-surface-2), var(--liquid-reminder-surface));
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(14px) saturate(138%);
+    -webkit-backdrop-filter: blur(14px) saturate(138%);
+    transform: translateX(-50%) scale(1);
+    transform-origin: top center;
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+    isolation: isolate;
+    filter: blur(4px) saturate(0.96) brightness(0.98);
+    will-change: width, min-height, padding, border-radius, transform, opacity, filter;
+    contain: layout paint style;
+}
+
+.liquid-reminder-island::before,
+.liquid-reminder-island::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.liquid-reminder-island::before {
+    border-radius: inherit;
+    border: 1px solid var(--liquid-reminder-highlight);
+    mask: linear-gradient(180deg, rgba(255, 255, 255, 0.95), transparent 40%);
+    opacity: 0.45;
+}
+
+.liquid-reminder-island::after {
+    inset: auto 20% -10px;
+    height: 26px;
+    border-radius: 50%;
+    background: radial-gradient(circle at center, rgba(255, 255, 255, 0.1), transparent 66%);
+    filter: blur(10px);
+    opacity: 0.08;
+}
+
+.liquid-reminder-island.liquid-reminder-visible {
+    pointer-events: auto;
+    animation: liquid-island-grow 980ms linear forwards;
+}
+
+.liquid-reminder-island.liquid-reminder-hiding {
+    pointer-events: none;
+    animation: liquid-island-collapse 260ms linear forwards;
+}
+
+.liquid-reminder-body {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px;
+    min-height: 92px;
+    opacity: 1;
+}
+
+.liquid-reminder-copy {
+    flex: 1;
+    min-width: 0;
+    color: var(--liquid-reminder-copy);
+    transform: translateY(6px) scale(0.8);
+    transform-origin: center top;
+    opacity: 0;
+    filter: blur(16px);
+    will-change: transform, opacity, filter;
+}
+
+.liquid-reminder-island.liquid-reminder-visible .liquid-reminder-copy {
+    animation: liquid-copy-release 460ms 430ms linear forwards;
+}
+
+.liquid-reminder-island.liquid-reminder-hiding .liquid-reminder-copy {
+    animation: liquid-copy-collapse 150ms ease-in forwards;
+}
+
+.liquid-reminder-title {
+    margin-bottom: 8px;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.18;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+}
+
+.liquid-reminder-message {
+    max-width: 45ch;
+    font-size: 14px;
+    line-height: 1.55;
+    text-wrap: pretty;
+}
+
+.liquid-reminder-meta {
+    margin-top: 10px;
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--liquid-reminder-copy-muted);
+}
+
+.liquid-reminder-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: min(240px, 40%);
+    transform: translateY(12px) scale(0.72);
+    transform-origin: center top;
+    opacity: 0;
+    filter: blur(18px);
+    will-change: transform, opacity, filter;
+}
+
+.liquid-reminder-island.liquid-reminder-visible .liquid-reminder-actions {
+    animation: liquid-actions-release 420ms 500ms linear forwards;
+}
+
+.liquid-reminder-island.liquid-reminder-hiding .liquid-reminder-actions {
+    animation: liquid-actions-collapse 150ms ease-in forwards;
+}
+
+.liquid-reminder-action,
+.liquid-reminder-close {
+    min-height: 35px;
+    padding: 0 13px;
+    border: 1px solid var(--liquid-reminder-action-border);
+    border-radius: 999px;
+    background: var(--liquid-reminder-action-bg);
+    color: rgba(255, 255, 255, 0.96);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    transition:
+        transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+        background-color 180ms ease,
+        border-color 180ms ease;
+}
+
+.liquid-reminder-close {
+    min-width: 35px;
+    padding: 0;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.liquid-reminder-action:hover,
+.liquid-reminder-close:hover {
+    transform: translateY(-1px) scale(1.02);
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.liquid-reminder-action:active,
+.liquid-reminder-close:active {
+    transform: scale(0.98);
+}
+
+@keyframes liquid-island-grow {
+    0% {
+        opacity: 0;
+        width: 8px;
+        min-height: 8px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(4px) saturate(0.96) brightness(0.98);
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+    }
+
+    4% {
+        opacity: 1;
+        width: 10px;
+        min-height: 10px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(3px) saturate(0.965) brightness(0.985);
+        box-shadow: 0 11px 24px rgba(0, 0, 0, 0.18);
+    }
+
+    9% {
+        opacity: 1;
+        width: 22px;
+        min-height: 14px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(2px) saturate(0.972) brightness(0.988);
+        box-shadow: 0 12px 25px rgba(0, 0, 0, 0.18);
+    }
+
+    14% {
+        opacity: 1;
+        width: 56px;
+        min-height: 22px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(1px) saturate(0.978) brightness(0.992);
+        box-shadow: 0 12px 26px rgba(0, 0, 0, 0.19);
+    }
+
+    20% {
+        opacity: 1;
+        width: 116px;
+        min-height: 30px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(1px) saturate(0.99) brightness(1);
+        box-shadow: 0 13px 28px rgba(0, 0, 0, 0.19);
+    }
+
+    27% {
+        opacity: 1;
+        width: 176px;
+        min-height: var(--liquid-reminder-collapsed-height);
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(0.5px) saturate(0.995) brightness(1);
+        box-shadow: 0 14px 29px rgba(0, 0, 0, 0.2);
+    }
+
+    35% {
+        width: 268px;
+        min-height: 36px;
+        padding: 0 2px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(0) saturate(1) brightness(1);
+        box-shadow: 0 14px 31px rgba(0, 0, 0, 0.2);
+    }
+
+    42% {
+        width: 430px;
+        min-height: 38px;
+        padding: 0 8px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(0) saturate(1) brightness(1);
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22);
+    }
+
+    50% {
+        width: 540px;
+        min-height: 42px;
+        padding: 1px 12px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 17px 38px rgba(0, 0, 0, 0.22);
+    }
+
+    58% {
+        width: 640px;
+        min-height: 48px;
+        padding: 2px 14px 1px;
+        border-radius: 999px 999px 16px 16px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 17px 39px rgba(0, 0, 0, 0.23);
+    }
+
+    64% {
+        width: var(--liquid-reminder-width);
+        min-height: 58px;
+        padding: 4px 16px 3px;
+        border-radius: 999px 999px 18px 18px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+    }
+
+    71% {
+        width: var(--liquid-reminder-width);
+        min-height: 74px;
+        padding: 7px 17px 5px;
+        border-radius: 999px 999px 18px 18px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 19px 43px rgba(0, 0, 0, 0.24);
+    }
+
+    78% {
+        width: var(--liquid-reminder-width);
+        min-height: 92px;
+        padding: 10px 18px 8px;
+        border-radius: 28px 28px 20px 20px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.25);
+    }
+
+    82% {
+        width: var(--liquid-reminder-width);
+        min-height: 100px;
+        padding: 11px 18px 9px;
+        border-radius: 26px 26px 20px 20px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 21px 47px rgba(0, 0, 0, 0.252);
+    }
+
+    86% {
+        width: var(--liquid-reminder-width);
+        min-height: 108px;
+        padding: 13px 18px 10px;
+        border-radius: 25px 25px 21px 21px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 22px 49px rgba(0, 0, 0, 0.258);
+    }
+
+    89% {
+        width: var(--liquid-reminder-width);
+        min-height: 114px;
+        padding: 14px 18px 11px;
+        border-radius: 24px 24px 22px 22px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 23px 51px rgba(0, 0, 0, 0.262);
+    }
+
+    92% {
+        width: var(--liquid-reminder-width);
+        min-height: 118px;
+        padding: 15px 18px 12px;
+        border-radius: 24px 24px 23px 23px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 24px 53px rgba(0, 0, 0, 0.268);
+    }
+
+    94% {
+        width: var(--liquid-reminder-width);
+        min-height: 119px;
+        padding: 15px 18px 12px;
+        border-radius: 24px 24px 23px 23px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 24px 54px rgba(0, 0, 0, 0.27);
+    }
+
+    96% {
+        width: var(--liquid-reminder-width);
+        min-height: 120px;
+        padding: 16px 18px 13px;
+        border-radius: 24px 24px 24px 24px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 25px 57px rgba(0, 0, 0, 0.272);
+    }
+
+    97% {
+        width: var(--liquid-reminder-width);
+        min-height: 121px;
+        padding: 16px 18px 13px;
+        border-radius: 24px 24px 24px 24px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 25px 59px rgba(0, 0, 0, 0.274);
+    }
+
+    98% {
+        width: var(--liquid-reminder-width);
+        min-height: 122px;
+        padding: 16px 18px 13px;
+        border-radius: 24px 24px 24px 24px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 26px 61px rgba(0, 0, 0, 0.276);
+    }
+
+    99% {
+        width: var(--liquid-reminder-width);
+        min-height: 122px;
+        padding: 16px 18px 14px;
+        border-radius: 24px 24px 25px 25px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: 0 26px 63px rgba(0, 0, 0, 0.278);
+    }
+
+    100% {
+        opacity: 1;
+        width: var(--liquid-reminder-width);
+        min-height: var(--liquid-reminder-height);
+        padding: 16px 18px 14px;
+        border-radius: 24px 24px 26px 26px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(0) saturate(1) brightness(1);
+        box-shadow: var(--liquid-reminder-shadow);
+    }
+}
+
+@keyframes liquid-island-collapse {
+    0% {
+        opacity: 1;
+        width: var(--liquid-reminder-width);
+        min-height: var(--liquid-reminder-height);
+        padding: 16px 18px 14px;
+        border-radius: 24px 24px 26px 26px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(0);
+    }
+
+    18% {
+        opacity: 1;
+        width: var(--liquid-reminder-width);
+        min-height: 102px;
+        padding: 12px 18px 9px;
+        border-radius: 24px 24px 22px 22px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(0);
+    }
+
+    34% {
+        opacity: 1;
+        width: var(--liquid-reminder-width);
+        min-height: 72px;
+        padding: 6px 16px 4px;
+        border-radius: 999px 999px 18px 18px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(0.5px);
+    }
+
+    52% {
+        opacity: 1;
+        width: 430px;
+        min-height: 40px;
+        padding: 0 8px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(1px);
+    }
+
+    72% {
+        opacity: 1;
+        width: 170px;
+        min-height: var(--liquid-reminder-collapsed-height);
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(1);
+        filter: blur(2px);
+    }
+
+    82% {
+        opacity: 0.96;
+        width: 112px;
+        min-height: 26px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.998);
+        filter: blur(2.4px);
+    }
+
+    88% {
+        opacity: 0.9;
+        width: 72px;
+        min-height: 18px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.996);
+        filter: blur(2.8px);
+    }
+
+    92% {
+        opacity: 0.82;
+        width: 42px;
+        min-height: 12px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.992);
+        filter: blur(3.2px);
+    }
+
+    95% {
+        opacity: 0.7;
+        width: 24px;
+        min-height: 9px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.988);
+        filter: blur(3.6px);
+    }
+
+    97% {
+        opacity: 0.52;
+        width: 16px;
+        min-height: 8px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.984);
+        filter: blur(4px);
+    }
+
+    99% {
+        opacity: 0.26;
+        width: 10px;
+        min-height: 8px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.981);
+        filter: blur(4.2px);
+    }
+
+    99.5% {
+        opacity: 0.14;
+        width: 9px;
+        min-height: 8px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.98);
+        filter: blur(4.35px);
+    }
+
+    99.75% {
+        opacity: 0.08;
+        width: 8px;
+        min-height: 8px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.98);
+        filter: blur(4.5px);
+    }
+
+    100% {
+        opacity: 0;
+        width: 8px;
+        min-height: 8px;
+        padding: 0;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.98);
+        filter: blur(4.6px);
+    }
+}
+
+@keyframes liquid-copy-release {
+    0% {
+        opacity: 0;
+        transform: translateY(6px) scale(0.8);
+        filter: blur(16px);
+    }
+
+    45% {
+        opacity: 0.42;
+        transform: translateY(3px) scale(0.88);
+        filter: blur(8px);
+    }
+
+    78% {
+        opacity: 0.86;
+        transform: translateY(0) scale(0.97);
+        filter: blur(2px);
+    }
+
+    90% {
+        opacity: 0.96;
+        transform: translateY(0) scale(0.992);
+        filter: blur(0.8px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+}
+
+@keyframes liquid-copy-collapse {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.88);
+        filter: blur(10px);
+    }
+}
+
+@keyframes liquid-actions-release {
+    0% {
+        opacity: 0;
+        transform: translateY(12px) scale(0.72);
+        filter: blur(18px);
+    }
+
+    20% {
+        opacity: 0.12;
+        transform: translateY(10px) scale(0.76);
+        filter: blur(14px);
+    }
+
+    46% {
+        opacity: 0.34;
+        transform: translateY(7px) scale(0.82);
+        filter: blur(10px);
+    }
+
+    68% {
+        opacity: 0.62;
+        transform: translateY(3px) scale(0.9);
+        filter: blur(5px);
+    }
+
+    86% {
+        opacity: 0.88;
+        transform: translateY(0) scale(0.97);
+        filter: blur(2px);
+    }
+
+    94% {
+        opacity: 0.97;
+        transform: translateY(0) scale(0.992);
+        filter: blur(0.8px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+}
+
+@keyframes liquid-actions-collapse {
+    from {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+
+    40% {
+        opacity: 0.58;
+        transform: translateY(2px) scale(0.92);
+        filter: blur(4px);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(-2px) scale(0.82);
+        filter: blur(10px);
+    }
+}
+
+
+@media (max-width: 720px) {
+    .liquid-reminder-island {
+        width: min(100vw - 10px, 560px);
+        min-height: 120px;
+        padding: 12px 12px 10px;
+        border-radius: 24px;
+    }
+
+    .liquid-reminder-body {
+        flex-direction: column;
+        align-items: stretch;
+        min-height: 0;
+        gap: 12px;
+    }
+
+    .liquid-reminder-message,
+    .liquid-reminder-actions {
+        max-width: none;
+        width: 100%;
+    }
+
+    .liquid-reminder-actions {
+        justify-content: flex-start;
+    }
+
+    .liquid-reminder-title {
+        font-size: 16px;
+    }
+
+    .liquid-reminder-message {
+        font-size: 13px;
+        line-height: 1.5;
+    }
+
+    .liquid-reminder-meta {
+        margin-top: 8px;
+        font-size: 11px;
+    }
+
+    .liquid-reminder-action,
+    .liquid-reminder-close {
+        min-height: 32px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .liquid-reminder-island,
+    .liquid-reminder-island.liquid-reminder-visible,
+    .liquid-reminder-island.liquid-reminder-hiding,
+    .liquid-reminder-copy,
+    .liquid-reminder-actions,
+    .liquid-reminder-action,
+    .liquid-reminder-close {
+        animation: none !important;
+        transition: none !important;
+    }
+
+    .liquid-reminder-island.liquid-reminder-visible {
+        opacity: 1;
+        transform: translateX(-50%) scale(1);
+        filter: none;
+    }
+
+    .liquid-reminder-island.liquid-reminder-hiding {
+        opacity: 0;
+        transform: translateX(-50%) scale(0.96);
+    }
+
+    .liquid-reminder-copy,
+    .liquid-reminder-actions {
+        opacity: 1;
+        transform: none;
+        filter: none;
+    }
+}
