@@ -7,8 +7,6 @@ const SCROLL_MAX_DURATION_MS = 520;
 const CONTENT_REVEAL_DURATION_MS = 240;
 const IDENTITY_FOCUS_TOP_OFFSET_PX = 18;
 const IDENTITY_ENTER_DURATION_MS = 360;
-const META_ENTER_DURATION_MS = 240;
-const META_STAGGER_MS = 68;
 const EMPTY_EXIT_DURATION_MS = 280;
 const MINUTE_MS = 60 * 1000;
 const DEFAULT_EYE_CARE_INTERVAL_MS = 20 * MINUTE_MS;
@@ -21,8 +19,6 @@ const WEATHER_CACHE_MS = 90 * MINUTE_MS;
 const HOLIDAY_API_TIMEOUT_MS = 8000;
 const WELCOME_CHECK_INTERVAL_MS = 500;
 const WELCOME_CHECK_TIMEOUT_MS = 12000;
-const MOBILE_BREAKPOINT_PX = 720;
-const MOBILE_COLLAPSE_DELAY_MS = 2600;
 const DISABLED_DAY_STORAGE_KEY = 'st-liquid-ui-reminder-disabled-day-v4';
 const REMINDER_SNOOZE_STORAGE_KEY = 'st-liquid-ui-reminder-snooze-until-v2';
 const REMINDER_STORAGE_KEYS = [
@@ -32,20 +28,27 @@ const REMINDER_STORAGE_KEYS = [
     'st-liquid-ui-reminder-snooze-until',
     'st-liquid-ui-reminder-snooze-until-v2',
     'st-liquid-ui-reminder-disabled-day-v4',
-    'st-liquid-ui-settings-v1',
 ];
-const SETTINGS_STORAGE_KEY = 'st-liquid-ui-settings-v1';
-const DEFAULT_SETTINGS = {
-    eyeCareMinutes: 20,
-    postureMinutes: 30,
-    snoozeMinutes: 5,
-    enableWelcomeIsland: true,
-    enableWeatherGreeting: true,
-    enableHolidayGreeting: true,
-    eyeReminderTemplate: '你已经连续看屏幕 {{duration}} 了，今天累计使用 {{daily_total}}，看看 20 英尺外至少 20 秒，让眼睛放松一下。',
-    postureReminderTemplate: '你已经连续使用 {{duration}} 了，今天累计使用 {{daily_total}}。{{weather_advice}}',
-    welcomeBlessingTemplate: '愿好运与你常在。{{weather_advice}}',
-};
+
+const SOLAR_HOLIDAY_GREETINGS = new Map([
+    ['1-1', '元旦快乐'],
+    ['10-1', '国庆快乐'],
+]);
+
+const HOLIDAY_GREETING_WHITELIST = new Map([
+    ['元旦节', '元旦快乐'],
+    ['元旦', '元旦快乐'],
+    ['春节', '春节快乐'],
+    ['元宵节', '元宵节快乐'],
+    ['端午节', '端午安康'],
+    ['中秋节', '中秋快乐'],
+    ['国庆节', '国庆快乐'],
+]);
+
+const SUNNY_WEATHER_CODES = new Set([0, 1, 2]);
+const RAINY_WEATHER_CODES = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82]);
+const SNOWY_WEATHER_CODES = new Set([71, 73, 75, 77, 85, 86]);
+const STORM_WEATHER_CODES = new Set([95, 96, 99]);
 
 const BODY_CHAT_PREPARING_CLASS = 'liquid-recent-chat-preparing';
 
@@ -57,11 +60,8 @@ let reminderIsland = null;
 let reminderTitle = null;
 let reminderMessage = null;
 let reminderMeta = null;
-let reminderSettingsButton = null;
-let reminderSettingsPanel = null;
 let reminderTimerId = 0;
 let reminderHideTimer = 0;
-let reminderMobileCollapseTimer = 0;
 let activeUsageMs = 0;
 let dailyUsageMs = 0;
 let usageDayStamp = new Date().toDateString();
@@ -77,70 +77,6 @@ let hasShownWelcomeIsland = false;
 let holidayPromise = null;
 let welcomeCheckTimerId = 0;
 let welcomeCheckStartedAt = 0;
-let reminderSettings = loadReminderSettings();
-
-function loadReminderSettings() {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
-        return sanitizeReminderSettings(parsed);
-    } catch {
-        return { ...DEFAULT_SETTINGS };
-    }
-}
-
-function sanitizeReminderSettings(value) {
-    const settings = { ...DEFAULT_SETTINGS };
-    if (!value || typeof value !== 'object') {
-        return settings;
-    }
-
-    const eyeCareMinutes = Number(value.eyeCareMinutes);
-    const postureMinutes = Number(value.postureMinutes);
-    const snoozeMinutes = Number(value.snoozeMinutes);
-
-    settings.eyeCareMinutes = Number.isFinite(eyeCareMinutes) ? clamp(Math.round(eyeCareMinutes), 5, 180) : DEFAULT_SETTINGS.eyeCareMinutes;
-    settings.postureMinutes = Number.isFinite(postureMinutes) ? clamp(Math.round(postureMinutes), 10, 240) : DEFAULT_SETTINGS.postureMinutes;
-    settings.snoozeMinutes = Number.isFinite(snoozeMinutes) ? clamp(Math.round(snoozeMinutes), 1, 60) : DEFAULT_SETTINGS.snoozeMinutes;
-    settings.enableWelcomeIsland = value.enableWelcomeIsland !== false;
-    settings.enableWeatherGreeting = value.enableWeatherGreeting !== false;
-    settings.enableHolidayGreeting = value.enableHolidayGreeting !== false;
-    settings.eyeReminderTemplate = typeof value.eyeReminderTemplate === 'string' && value.eyeReminderTemplate.trim() ? value.eyeReminderTemplate.trim() : DEFAULT_SETTINGS.eyeReminderTemplate;
-    settings.postureReminderTemplate = typeof value.postureReminderTemplate === 'string' && value.postureReminderTemplate.trim() ? value.postureReminderTemplate.trim() : DEFAULT_SETTINGS.postureReminderTemplate;
-    settings.welcomeBlessingTemplate = typeof value.welcomeBlessingTemplate === 'string' && value.welcomeBlessingTemplate.trim() ? value.welcomeBlessingTemplate.trim() : DEFAULT_SETTINGS.welcomeBlessingTemplate;
-    return settings;
-}
-
-function saveReminderSettings() {
-    try {
-        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(reminderSettings));
-    } catch {
-        // Ignore storage write failures.
-    }
-}
-
-function getEyeCareIntervalMs() {
-    return reminderSettings.eyeCareMinutes * MINUTE_MS || DEFAULT_EYE_CARE_INTERVAL_MS;
-}
-
-function getPostureIntervalMs() {
-    return reminderSettings.postureMinutes * MINUTE_MS || DEFAULT_POSTURE_INTERVAL_MS;
-}
-
-function getReminderSnoozeMs() {
-    return reminderSettings.snoozeMinutes * MINUTE_MS || DEFAULT_REMINDER_SNOOZE_MS;
-}
-
-function resetReminderThresholds() {
-    nextEyeReminderAt = activeUsageMs + getEyeCareIntervalMs();
-    nextPostureReminderAt = activeUsageMs + getPostureIntervalMs();
-}
-
-function applyTemplate(template, variables, fallback) {
-    const source = typeof template === 'string' && template.trim() ? template : fallback;
-    return source.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_, key) => {
-        return Object.prototype.hasOwnProperty.call(variables, key) ? String(variables[key] ?? '') : '';
-    }).replace(/\s+/g, ' ').trim();
-}
 
 function emptyTransition() {
     return {
@@ -160,21 +96,10 @@ function clearReminderHideTimer() {
     }
 }
 
-function clearReminderMobileCollapseTimer() {
-    if (reminderMobileCollapseTimer) {
-        window.clearTimeout(reminderMobileCollapseTimer);
-        reminderMobileCollapseTimer = 0;
-    }
-}
-
-function isMobileViewport() {
-    return window.innerWidth <= MOBILE_BREAKPOINT_PX;
-}
-
 function cleanupReminderStorage() {
     try {
         REMINDER_STORAGE_KEYS.forEach(key => {
-            if (key !== DISABLED_DAY_STORAGE_KEY && key !== REMINDER_SNOOZE_STORAGE_KEY && key !== SETTINGS_STORAGE_KEY) {
+            if (key !== DISABLED_DAY_STORAGE_KEY && key !== REMINDER_SNOOZE_STORAGE_KEY) {
                 localStorage.removeItem(key);
             }
         });
@@ -277,24 +202,7 @@ function getTimeGreeting(date = new Date()) {
 
 function getPositiveHolidayGreeting(date = new Date()) {
     const monthDay = `${date.getMonth() + 1}-${date.getDate()}`;
-    const solarHolidays = new Map([
-        ['1-1', '元旦快乐'],
-        ['10-1', '国庆快乐'],
-    ]);
-
-    return solarHolidays.get(monthDay) || '';
-}
-
-function getHolidayWhitelist() {
-    return new Map([
-        ['元旦节', '元旦快乐'],
-        ['元旦', '元旦快乐'],
-        ['春节', '春节快乐'],
-        ['元宵节', '元宵节快乐'],
-        ['端午节', '端午安康'],
-        ['中秋节', '中秋快乐'],
-        ['国庆节', '国庆快乐'],
-    ]);
+    return SOLAR_HOLIDAY_GREETINGS.get(monthDay) || '';
 }
 
 function getWeatherLabel(weatherCode) {
@@ -379,20 +287,12 @@ function getWeatherMeta(weather) {
 function getWelcomePayload(weather) {
     const holidayGreeting = '';
     const title = holidayGreeting ? `${getTimeGreeting()} · ${holidayGreeting}` : getTimeGreeting();
-    const weatherAdvice = reminderSettings.enableWeatherGreeting ? getWeatherActivitySuggestion(weather) : '今天也别忘了适时活动和补水。';
 
     return {
         mode: 'welcome',
         title,
-        message: applyTemplate(reminderSettings.welcomeBlessingTemplate, {
-            weather_advice: weatherAdvice,
-            greeting: getTimeGreeting(),
-            holiday: holidayGreeting,
-            weather_label: weather ? getWeatherLabel(weather.weatherCode) : '',
-            temperature: typeof weather?.temperature === 'number' ? `${Math.round(weather.temperature)}°C` : '--',
-            wind_speed: typeof weather?.windSpeed === 'number' ? `${weather.windSpeed.toFixed(1)} m/s` : '--',
-        }, DEFAULT_SETTINGS.welcomeBlessingTemplate),
-        meta: reminderSettings.enableWeatherGreeting ? getWeatherMeta(weather) : '欢迎来到酒馆',
+        message: `愿好运与你常在。${getWeatherActivitySuggestion(weather)}`,
+        meta: getWeatherMeta(weather),
     };
 }
 
@@ -414,7 +314,6 @@ function withTimeout(promise, timeoutMs) {
 async function fetchHolidayGreeting(date = new Date()) {
     const fallbackGreeting = getPositiveHolidayGreeting(date);
     const dateStamp = date.toISOString().slice(0, 10);
-    const whitelist = getHolidayWhitelist();
 
     try {
         const response = await withTimeout(fetch(`https://timor.tech/api/holiday/info/${dateStamp}`, { method: 'GET' }), HOLIDAY_API_TIMEOUT_MS);
@@ -424,8 +323,8 @@ async function fetchHolidayGreeting(date = new Date()) {
 
         const data = await response.json();
         const holidayName = data?.holiday?.name;
-        if (typeof holidayName === 'string' && whitelist.has(holidayName)) {
-            return whitelist.get(holidayName) || '';
+        if (typeof holidayName === 'string' && HOLIDAY_GREETING_WHITELIST.has(holidayName)) {
+            return HOLIDAY_GREETING_WHITELIST.get(holidayName) || '';
         }
     } catch (error) {
         console.debug(`${EXTENSION_TAG} holiday unavailable`, error);
@@ -462,25 +361,19 @@ function isOnHomepage() {
 }
 
 function getWeatherTone(weatherCode) {
-    const sunnyCodes = new Set([0, 1]);
-    const mixedCodes = new Set([2]);
-    const rainyCodes = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82]);
-    const snowyCodes = new Set([71, 73, 75, 77, 85, 86]);
-    const stormCodes = new Set([95, 96, 99]);
-
-    if (sunnyCodes.has(weatherCode) || mixedCodes.has(weatherCode)) {
+    if (SUNNY_WEATHER_CODES.has(weatherCode)) {
         return 'sunny';
     }
 
-    if (rainyCodes.has(weatherCode)) {
+    if (RAINY_WEATHER_CODES.has(weatherCode)) {
         return 'rainy';
     }
 
-    if (snowyCodes.has(weatherCode)) {
+    if (SNOWY_WEATHER_CODES.has(weatherCode)) {
         return 'snowy';
     }
 
-    if (stormCodes.has(weatherCode)) {
+    if (STORM_WEATHER_CODES.has(weatherCode)) {
         return 'stormy';
     }
 
@@ -490,27 +383,12 @@ function getWeatherTone(weatherCode) {
 function getWeatherMessage(weather) {
     const duration = formatDuration(activeUsageMs);
     const dailyTotal = formatDuration(dailyUsageMs);
-    const weatherAdvice = reminderSettings.enableWeatherGreeting ? getWeatherActivitySuggestion(weather) : '建议起来活动一下，顺便喝口水。';
 
     if (!weather) {
-        return applyTemplate(reminderSettings.postureReminderTemplate, {
-            duration,
-            daily_total: dailyTotal,
-            weather_advice: '建议起来活动一下，顺便喝口水。',
-            weather_label: '',
-            temperature: '--',
-            wind_speed: '--',
-        }, DEFAULT_SETTINGS.postureReminderTemplate);
+        return `你已经连续使用 ${duration} 了，今天累计使用 ${dailyTotal}，建议起来活动一下，顺便喝口水。`;
     }
 
-    return applyTemplate(reminderSettings.postureReminderTemplate, {
-        duration,
-        daily_total: dailyTotal,
-        weather_advice: weatherAdvice,
-        weather_label: getWeatherLabel(weather.weatherCode),
-        temperature: typeof weather.temperature === 'number' ? `${Math.round(weather.temperature)}°C` : '--',
-        wind_speed: typeof weather.windSpeed === 'number' ? `${weather.windSpeed.toFixed(1)} m/s` : '--',
-    }, DEFAULT_SETTINGS.postureReminderTemplate);
+    return `你已经连续使用 ${duration} 了，今天累计使用 ${dailyTotal}，${getWeatherActivitySuggestion(weather)}`;
 }
 
 function getReminderPayload(type, weather) {
@@ -529,10 +407,7 @@ function getReminderPayload(type, weather) {
         return {
             mode: 'eye',
             title: '20-20-20 护眼提醒',
-            message: applyTemplate(reminderSettings.eyeReminderTemplate, {
-                duration,
-                daily_total: formatDuration(dailyUsageMs),
-            }, DEFAULT_SETTINGS.eyeReminderTemplate),
+            message: `你已经连续看屏幕 ${duration} 了，今天累计使用 ${formatDuration(dailyUsageMs)}，看看 20 英尺外至少 20 秒，让眼睛放松一下。`,
             meta: `每 20 分钟循环提醒 · 今日累计 ${formatDuration(dailyUsageMs)}`,
         };
     }
@@ -551,8 +426,6 @@ function hideReminderIsland(immediate = false) {
     }
 
     clearReminderHideTimer();
-    clearReminderMobileCollapseTimer();
-    reminderIsland.classList.remove('liquid-reminder-mobile-collapsed');
     reminderIsland.classList.toggle('liquid-reminder-visible', false);
     reminderIsland.classList.toggle('liquid-reminder-hiding', !immediate);
 
@@ -571,7 +444,6 @@ function showReminderIsland(payload) {
     reminderMeta.textContent = payload.meta;
     reminderIsland.dataset.mode = payload.mode || 'default';
     reminderIsland.classList.remove('liquid-reminder-hiding');
-    reminderIsland.classList.remove('liquid-reminder-mobile-collapsed');
     reminderIsland.classList.remove('liquid-reminder-visible');
     void reminderIsland.offsetWidth;
     reminderIsland.classList.add('liquid-reminder-visible');
@@ -580,167 +452,6 @@ function showReminderIsland(payload) {
     reminderHideTimer = window.setTimeout(() => {
         hideReminderIsland();
     }, REMINDER_AUTO_HIDE_MS);
-
-    if (isMobileViewport()) {
-        clearReminderMobileCollapseTimer();
-        reminderMobileCollapseTimer = window.setTimeout(() => {
-            if (reminderIsland instanceof HTMLElement && reminderIsland.classList.contains('liquid-reminder-visible')) {
-                reminderIsland.classList.add('liquid-reminder-mobile-collapsed');
-            }
-            reminderMobileCollapseTimer = 0;
-        }, MOBILE_COLLAPSE_DELAY_MS);
-    }
-}
-
-function createSettingsField(label, controlHtml, options = {}) {
-    const restoreButton = options.defaultKey
-        ? `<button type="button" class="liquid-reminder-setting-reset" data-default-key="${options.defaultKey}">恢复默认</button>`
-        : '';
-
-    return `
-        <label class="liquid-reminder-setting-field">
-            <span class="liquid-reminder-setting-label-row">
-                <span>${label}</span>
-                ${restoreButton}
-            </span>
-            ${controlHtml}
-        </label>
-    `;
-}
-
-function toggleReminderSettingsPanel() {
-    if (!(reminderSettingsPanel instanceof HTMLElement)) {
-        return;
-    }
-
-    reminderSettingsPanel.classList.toggle('liquid-reminder-settings-open');
-}
-
-function openReminderSettingsPanel() {
-    createReminderSettingsPanel();
-    reminderSettingsPanel?.classList.add('liquid-reminder-settings-open');
-}
-
-function syncReminderSettingsPanel() {
-    if (!(reminderSettingsPanel instanceof HTMLElement)) {
-        return;
-    }
-
-    const mapValue = (selector, value) => {
-        const element = reminderSettingsPanel.querySelector(selector);
-        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-            if (element.type === 'checkbox') {
-                element.checked = Boolean(value);
-            } else {
-                element.value = String(value);
-            }
-        }
-    };
-
-    mapValue('[name="eyeCareMinutes"]', reminderSettings.eyeCareMinutes);
-    mapValue('[name="postureMinutes"]', reminderSettings.postureMinutes);
-    mapValue('[name="snoozeMinutes"]', reminderSettings.snoozeMinutes);
-    mapValue('[name="enableWelcomeIsland"]', reminderSettings.enableWelcomeIsland);
-    mapValue('[name="enableWeatherGreeting"]', reminderSettings.enableWeatherGreeting);
-    mapValue('[name="enableHolidayGreeting"]', reminderSettings.enableHolidayGreeting);
-    mapValue('[name="eyeReminderTemplate"]', reminderSettings.eyeReminderTemplate);
-    mapValue('[name="postureReminderTemplate"]', reminderSettings.postureReminderTemplate);
-    mapValue('[name="welcomeBlessingTemplate"]', reminderSettings.welcomeBlessingTemplate);
-}
-
-function handleReminderSettingsInput(event) {
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) {
-        return;
-    }
-
-    reminderSettings = sanitizeReminderSettings({
-        ...reminderSettings,
-        [target.name]: target.type === 'checkbox' ? target.checked : target.value,
-    });
-
-    saveReminderSettings();
-    resetReminderThresholds();
-    syncReminderSettingsPanel();
-}
-
-function handleReminderSettingsClick(event) {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-        return;
-    }
-
-    const resetButton = target.closest('[data-default-key]');
-    if (!(resetButton instanceof HTMLButtonElement)) {
-        return;
-    }
-
-    const defaultKey = resetButton.dataset.defaultKey;
-    if (!defaultKey || !Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, defaultKey)) {
-        return;
-    }
-
-    reminderSettings = sanitizeReminderSettings({
-        ...reminderSettings,
-        [defaultKey]: DEFAULT_SETTINGS[defaultKey],
-    });
-
-    saveReminderSettings();
-    resetReminderThresholds();
-    syncReminderSettingsPanel();
-}
-
-function createReminderSettingsPanel() {
-    if (reminderSettingsPanel instanceof HTMLElement) {
-        return reminderSettingsPanel;
-    }
-
-    const panel = document.createElement('section');
-    panel.className = 'liquid-reminder-settings-panel';
-    panel.innerHTML = `
-        <div class="liquid-reminder-settings-header">
-            <h3>Liquid 提醒设置</h3>
-            <button type="button" class="liquid-reminder-settings-close" aria-label="关闭设置">×</button>
-        </div>
-        <div class="liquid-reminder-settings-grid">
-            ${createSettingsField('护眼间隔（分钟）', '<input name="eyeCareMinutes" type="number" min="5" max="180">')}
-            ${createSettingsField('久坐间隔（分钟）', '<input name="postureMinutes" type="number" min="10" max="240">')}
-            ${createSettingsField('稍后提醒（分钟）', '<input name="snoozeMinutes" type="number" min="1" max="60">')}
-            ${createSettingsField('启用欢迎岛', '<input name="enableWelcomeIsland" type="checkbox">')}
-            ${createSettingsField('启用天气联动', '<input name="enableWeatherGreeting" type="checkbox">')}
-            ${createSettingsField('启用节日问候', '<input name="enableHolidayGreeting" type="checkbox">')}
-            ${createSettingsField('护眼提醒模板', '<textarea name="eyeReminderTemplate" rows="3"></textarea>', { defaultKey: 'eyeReminderTemplate' })}
-            ${createSettingsField('久坐提醒模板', '<textarea name="postureReminderTemplate" rows="3"></textarea>', { defaultKey: 'postureReminderTemplate' })}
-            ${createSettingsField('欢迎语模板', '<textarea name="welcomeBlessingTemplate" rows="3"></textarea>', { defaultKey: 'welcomeBlessingTemplate' })}
-        </div>
-        <div class="liquid-reminder-settings-note">可用变量：{{duration}} {{daily_total}} {{weather_advice}} {{weather_label}} {{temperature}} {{wind_speed}} {{greeting}} {{holiday}}</div>
-    `;
-
-    panel.addEventListener('input', handleReminderSettingsInput);
-    panel.addEventListener('click', handleReminderSettingsClick);
-    panel.querySelector('.liquid-reminder-settings-close')?.addEventListener('click', toggleReminderSettingsPanel);
-    document.body.appendChild(panel);
-    reminderSettingsPanel = panel;
-    syncReminderSettingsPanel();
-    return panel;
-}
-
-function createReminderSettingsButton() {
-    if (reminderSettingsButton instanceof HTMLElement) {
-        return reminderSettingsButton;
-    }
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'liquid-reminder-settings-button';
-    button.textContent = '提醒设置';
-    button.addEventListener('click', () => {
-        openReminderSettingsPanel();
-    });
-
-    document.body.appendChild(button);
-    reminderSettingsButton = button;
-    return button;
 }
 
 function createReminderIsland() {
@@ -763,7 +474,6 @@ function createReminderIsland() {
             <div class="liquid-reminder-actions">
                 <button type="button" class="menu_button liquid-reminder-action" data-action="snooze">5 分钟后</button>
                 <button type="button" class="menu_button liquid-reminder-action" data-action="disable">今天不再提醒</button>
-                <button type="button" class="menu_button liquid-reminder-action liquid-reminder-mobile-settings" data-action="settings">设置</button>
                 <button type="button" class="menu_button liquid-reminder-close" data-action="close" aria-label="关闭提醒">×</button>
             </div>
         </div>
@@ -773,12 +483,6 @@ function createReminderIsland() {
     island.addEventListener('pointerleave', () => {
         clearReminderHideTimer();
         reminderHideTimer = window.setTimeout(() => hideReminderIsland(), REMINDER_AUTO_HIDE_MS / 2);
-    });
-    island.addEventListener('pointerdown', () => {
-        if (isMobileViewport()) {
-            island.classList.remove('liquid-reminder-mobile-collapsed');
-            clearReminderMobileCollapseTimer();
-        }
     });
     island.addEventListener('click', event => {
         const target = event.target;
@@ -796,11 +500,6 @@ function createReminderIsland() {
 
         if (action === 'disable') {
             setReminderDisabledToday();
-            return;
-        }
-
-        if (action === 'settings') {
-            openReminderSettingsPanel();
             return;
         }
 
@@ -901,7 +600,7 @@ async function triggerReminder(type) {
 }
 
 async function maybeShowWelcomeIsland() {
-    if (hasShownWelcomeIsland || !reminderSettings.enableWelcomeIsland || !isOnHomepage()) {
+    if (hasShownWelcomeIsland || !isOnHomepage()) {
         return;
     }
 
@@ -914,7 +613,7 @@ async function maybeShowWelcomeIsland() {
     ]);
 
     const payload = getWelcomePayload(weather);
-    if (holidayGreeting && reminderSettings.enableHolidayGreeting) {
+    if (holidayGreeting) {
         payload.title = `${payload.title} · ${holidayGreeting}`;
     }
 
@@ -958,11 +657,11 @@ function scheduleWelcomeIslandCheck() {
 
 function advanceReminderThresholds(nowMs) {
     while (nextEyeReminderAt <= nowMs) {
-        nextEyeReminderAt += getEyeCareIntervalMs();
+        nextEyeReminderAt += DEFAULT_EYE_CARE_INTERVAL_MS;
     }
 
     while (nextPostureReminderAt <= nowMs) {
-        nextPostureReminderAt += getPostureIntervalMs();
+        nextPostureReminderAt += DEFAULT_POSTURE_INTERVAL_MS;
     }
 }
 
@@ -1011,24 +710,10 @@ async function reminderTick() {
 function installReminderIsland() {
     cleanupReminderStorage();
     createReminderIsland();
-    createReminderSettingsButton();
     markUserActivity();
-    resetReminderThresholds();
 
     ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart'].forEach(eventName => {
         document.addEventListener(eventName, markUserActivity, { passive: true });
-    });
-
-    ['scroll', 'touchstart', 'pointerdown', 'keydown'].forEach(eventName => {
-        document.addEventListener(eventName, () => {
-            if (!isMobileViewport() || !(reminderIsland instanceof HTMLElement)) {
-                return;
-            }
-
-            if (reminderIsland.classList.contains('liquid-reminder-visible')) {
-                reminderIsland.classList.add('liquid-reminder-mobile-collapsed');
-            }
-        }, { passive: true });
     });
 
     document.addEventListener('visibilitychange', () => {
@@ -1085,14 +770,6 @@ function rectFromEdges(left, top, right, bottom) {
 
 function rectFromDomRect(rect) {
     return rectFromEdges(rect.left, rect.top, rect.right, rect.bottom);
-}
-
-function offsetRect(rect, dx = 0, dy = 0) {
-    if (!rect) {
-        return null;
-    }
-
-    return rectFromEdges(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy);
 }
 
 function getElementRect(element) {
@@ -1425,33 +1102,6 @@ function composeTransform({ x = 0, y = 0, scaleX = 1, scaleY = 1, rotate = 0 } =
     return transforms.join(' ');
 }
 
-function getTransformFromRects(startRect, targetRect, { allowScale = true } = {}) {
-    if (!targetRect) {
-        return {
-            x: 0,
-            y: 0,
-            scaleX: 1,
-            scaleY: 1,
-        };
-    }
-
-    if (!startRect) {
-        return {
-            x: 0,
-            y: 18,
-            scaleX: 0.98,
-            scaleY: 0.98,
-        };
-    }
-
-    return {
-        x: startRect.left - targetRect.left,
-        y: startRect.top - targetRect.top,
-        scaleX: allowScale && targetRect.width > 0 ? clamp(startRect.width / targetRect.width, 0.72, 1.28) : 1,
-        scaleY: allowScale && targetRect.height > 0 ? clamp(startRect.height / targetRect.height, 0.72, 1.28) : 1,
-    };
-}
-
 function trackAnimation(store, animation) {
     if (animation) {
         store.push(animation);
@@ -1764,82 +1414,6 @@ function createTransitionContent(card, toRect) {
         floatingName: createFloatingIdentityNode(sourceNameElement, sourceNameRect, 'name'),
         hiddenTargetElements: [],
     };
-}
-
-function animateIdentityEnter(activeAnimations, element, startRect, targetRect, {
-    delay: animationDelay = 0,
-    duration = IDENTITY_ENTER_DURATION_MS,
-    allowScale = true,
-    blurStart = 6,
-} = {}) {
-    if (!(element instanceof HTMLElement) || !targetRect) {
-        return null;
-    }
-
-    const resolvedStartRect = startRect || offsetRect(targetRect, 0, 18);
-    const { x, y, scaleX, scaleY } = getTransformFromRects(resolvedStartRect, targetRect, { allowScale });
-
-    return startAnimation(activeAnimations, element, [
-        {
-            opacity: 0,
-            transform: composeTransform({ x, y: y + 12, scaleX, scaleY }),
-            filter: `blur(${blurStart}px)`,
-            offset: 0,
-        },
-        {
-            opacity: 0.9,
-            transform: composeTransform({ x, y, scaleX, scaleY }),
-            filter: 'blur(0px)',
-            offset: 0.46,
-        },
-        {
-            opacity: 1,
-            transform: 'translate(0px, 0px) scale(1, 1)',
-            filter: 'blur(0px)',
-            offset: 1,
-        },
-    ], {
-        duration,
-        delay: animationDelay,
-        easing: 'cubic-bezier(0.18, 0.88, 0.24, 1)',
-        fill: 'forwards',
-    });
-}
-
-function animateMetaEnter(activeAnimations, elements) {
-    const animations = [];
-
-    elements.forEach((element, index) => {
-        if (!(element instanceof HTMLElement)) {
-            return;
-        }
-
-        const animation = startAnimation(activeAnimations, element, [
-            {
-                opacity: 0,
-                transform: 'translateY(14px) scale(0.98)',
-                filter: 'blur(8px)',
-                offset: 0,
-            },
-            {
-                opacity: 1,
-                transform: 'translateY(0px) scale(1)',
-                filter: 'blur(0px)',
-                offset: 1,
-            },
-        ], {
-            duration: META_ENTER_DURATION_MS,
-            delay: index * META_STAGGER_MS,
-            easing: 'cubic-bezier(0.2, 0.84, 0.22, 1)',
-            fill: 'forwards',
-        });
-
-        if (animation) {
-            animations.push(animation);
-        }
-    });
-
-    return animations;
 }
 
 async function playEmptyIdentityExit(transitionDom, activeAnimations, fromRect) {

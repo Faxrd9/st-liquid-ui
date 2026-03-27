@@ -1,8 +1,9 @@
 :root {
     --liquid-reminder-width: min(700px, calc(100vw - 24px));
-    --liquid-reminder-height: 122px;
+    --liquid-reminder-height: 156px;
     --liquid-reminder-collapsed-width: 146px;
     --liquid-reminder-collapsed-height: 36px;
+    --liquid-reminder-collapsed-target-width: 168px;
     --liquid-reminder-surface: rgba(7, 7, 10, 0.94);
     --liquid-reminder-surface-2: rgba(19, 19, 24, 0.92);
     --liquid-reminder-border: rgba(255, 255, 255, 0.08);
@@ -16,7 +17,7 @@
 
 .liquid-reminder-island {
     position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) - 6px);
+    top: max(10px, env(safe-area-inset-top, 0px) + 10px);
     left: 50%;
     z-index: 2147482500;
     width: 8px;
@@ -40,6 +41,15 @@
     filter: blur(4px) saturate(0.96) brightness(0.98);
     will-change: width, min-height, padding, border-radius, transform, opacity, filter;
     contain: layout paint style;
+    transition:
+        width 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        min-height 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        padding 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-radius 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 220ms ease,
+        filter 260ms ease,
+        box-shadow 260ms ease;
 }
 
 .liquid-reminder-island::before,
@@ -76,48 +86,86 @@
     animation: liquid-island-collapse 260ms linear forwards;
 }
 
-.liquid-reminder-island.liquid-reminder-mobile-collapsed {
-    width: min(168px, calc(100vw - 24px));
+.liquid-reminder-island.liquid-reminder-collapsed {
+    animation: liquid-island-mobile-collapse 520ms cubic-bezier(0.24, 1, 0.3, 1) forwards;
+    width: min(var(--liquid-reminder-collapsed-target-width), calc(100vw - 24px));
     min-height: 34px;
     padding: 0 12px;
     border-radius: 999px;
     opacity: 0.96;
     overflow: hidden;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
+    filter: blur(0) saturate(1) brightness(1);
+    transform: translateX(-50%) scale(0.982);
+    pointer-events: none;
 }
 
-.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-body {
+.liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-body {
     min-height: 34px;
     align-items: center;
+    justify-content: center;
+    animation: liquid-island-mobile-body-collapse 520ms cubic-bezier(0.24, 1, 0.3, 1) forwards;
+    gap: 0;
 }
 
-.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-copy {
+.liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-copy {
     opacity: 1;
     transform: none;
     filter: none;
+    width: 100%;
+    text-align: center;
+    animation: liquid-island-mobile-copy-collapse 360ms cubic-bezier(0.28, 0.84, 0.42, 1) forwards;
 }
 
-.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-message,
-.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-meta,
-.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-actions {
-    display: none;
+.liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-message,
+.liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-meta,
+.liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-actions {
+    opacity: 0;
+    max-height: 0;
+    overflow: hidden;
+    transform: translateY(-6px) scale(0.94);
+    filter: blur(8px);
+    animation: liquid-island-mobile-fade-collapse 300ms ease forwards;
+    pointer-events: none;
 }
 
-.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-title {
+.liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-title {
     margin: 0;
     font-size: 13px;
+    max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    letter-spacing: 0.01em;
+    animation: liquid-island-mobile-title-collapse 520ms cubic-bezier(0.24, 1, 0.3, 1) forwards;
+}
+
+.liquid-reminder-island.liquid-reminder-collapsed::after {
+    opacity: 0;
+    animation: liquid-island-mobile-glow-collapse 260ms ease forwards;
+}
+
+.liquid-reminder-island.liquid-reminder-visible:not(.liquid-reminder-collapsed) .liquid-reminder-body,
+.liquid-reminder-island.liquid-reminder-visible:not(.liquid-reminder-collapsed) .liquid-reminder-copy,
+.liquid-reminder-island.liquid-reminder-visible:not(.liquid-reminder-collapsed) .liquid-reminder-actions {
+    transition:
+        min-height 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        gap 260ms ease,
+        opacity 220ms ease,
+        transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+        filter 220ms ease,
+        max-height 320ms cubic-bezier(0.22, 1, 0.36, 1),
+        margin 220ms ease,
+        font-size 220ms ease;
 }
 
 .liquid-reminder-body {
     position: relative;
     z-index: 1;
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 18px;
-    min-height: 92px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    min-height: 124px;
     opacity: 1;
 }
 
@@ -151,13 +199,15 @@
 
 .liquid-reminder-message {
     max-width: 45ch;
+    max-height: 220px;
     font-size: 14px;
     line-height: 1.55;
     text-wrap: pretty;
 }
 
 .liquid-reminder-meta {
-    margin-top: 10px;
+    margin-top: 12px;
+    max-height: 48px;
     font-size: 12px;
     line-height: 1.3;
     color: var(--liquid-reminder-copy-muted);
@@ -166,10 +216,12 @@
 .liquid-reminder-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     flex-wrap: wrap;
     gap: 8px;
-    width: min(240px, 40%);
+    width: 100%;
+    max-width: 100%;
+    min-height: 36px;
     transform: translateY(12px) scale(0.72);
     transform-origin: center top;
     opacity: 0;
@@ -187,7 +239,7 @@
 
 .liquid-reminder-action,
 .liquid-reminder-close {
-    min-height: 35px;
+    min-height: 36px;
     padding: 0 13px;
     border: 1px solid var(--liquid-reminder-action-border);
     border-radius: 999px;
@@ -200,6 +252,7 @@
         transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
         background-color 180ms ease,
         border-color 180ms ease;
+    white-space: nowrap;
 }
 
 .liquid-reminder-close {
@@ -207,6 +260,10 @@
     padding: 0;
     font-size: 18px;
     line-height: 1;
+}
+
+.liquid-reminder-mobile-settings {
+    display: inline-flex;
 }
 
 .liquid-reminder-action:hover,
@@ -443,6 +500,267 @@
         transform: translateX(-50%) scale(1);
         filter: blur(0) saturate(1) brightness(1);
         box-shadow: var(--liquid-reminder-shadow);
+    }
+}
+
+@keyframes liquid-island-mobile-collapse {
+    0% {
+        width: var(--liquid-reminder-width);
+        min-height: var(--liquid-reminder-height);
+        padding: 16px 18px 14px;
+        border-radius: 24px 24px 26px 26px;
+        transform: translateX(-50%) scale(1);
+        box-shadow: var(--liquid-reminder-shadow);
+        filter: blur(0) saturate(1) brightness(1);
+    }
+
+    8% {
+        width: calc(var(--liquid-reminder-width) - 6%);
+        min-height: 124px;
+        padding: 15px 17px 13px;
+        border-radius: 24px 24px 24px 24px;
+        transform: translateX(-50%) scale(0.999);
+        box-shadow: 0 26px 62px rgba(0, 0, 0, 0.34);
+    }
+
+    16% {
+        width: calc(var(--liquid-reminder-width) - 10%);
+        min-height: 116px;
+        padding: 14px 16px 12px;
+        border-radius: 24px 24px 23px 23px;
+        transform: translateX(-50%) scale(0.9986);
+        box-shadow: 0 25px 58px rgba(0, 0, 0, 0.325);
+    }
+
+    24% {
+        width: calc(var(--liquid-reminder-width) - 14%);
+        min-height: 112px;
+        padding: 13px 16px 11px;
+        border-radius: 24px 24px 23px 23px;
+        transform: translateX(-50%) scale(0.998);
+        box-shadow: 0 24px 56px rgba(0, 0, 0, 0.31);
+    }
+
+    32% {
+        width: calc(var(--liquid-reminder-width) - 24%);
+        min-height: 94px;
+        padding: 10px 15px 8px;
+        border-radius: 24px 24px 20px 20px;
+        transform: translateX(-50%) scale(0.996);
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.28);
+    }
+
+    40% {
+        width: calc(var(--liquid-reminder-width) - 30%);
+        min-height: 84px;
+        padding: 8px 15px 7px;
+        border-radius: 999px 999px 19px 19px;
+        transform: translateX(-50%) scale(0.9948);
+        box-shadow: 0 19px 45px rgba(0, 0, 0, 0.265);
+    }
+
+    50% {
+        width: calc(var(--liquid-reminder-width) - 38%);
+        min-height: 72px;
+        padding: 6px 14px 5px;
+        border-radius: 999px 999px 18px 18px;
+        transform: translateX(-50%) scale(0.993);
+        box-shadow: 0 17px 42px rgba(0, 0, 0, 0.25);
+    }
+
+    60% {
+        width: calc(var(--liquid-reminder-collapsed-target-width) + 54px);
+        min-height: 52px;
+        padding: 3px 12px 2px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.99);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.23);
+    }
+
+    70% {
+        width: calc(var(--liquid-reminder-collapsed-target-width) + 38px);
+        min-height: 46px;
+        padding: 2px 12px 1px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.988);
+        box-shadow: 0 15px 38px rgba(0, 0, 0, 0.222);
+    }
+
+    80% {
+        width: calc(var(--liquid-reminder-collapsed-target-width) + 26px);
+        min-height: 42px;
+        padding: 1px 11px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.987);
+        box-shadow: 0 15px 37px rgba(0, 0, 0, 0.218);
+    }
+
+    88% {
+        width: calc(var(--liquid-reminder-collapsed-target-width) + 10px);
+        min-height: 37px;
+        padding: 0 11px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.984);
+        box-shadow: 0 14px 35px rgba(0, 0, 0, 0.214);
+    }
+
+    94% {
+        width: calc(var(--liquid-reminder-collapsed-target-width) + 4px);
+        min-height: 35px;
+        padding: 0 11px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.983);
+        box-shadow: 0 14px 35px rgba(0, 0, 0, 0.215);
+    }
+
+    98% {
+        width: calc(var(--liquid-reminder-collapsed-target-width) + 1px);
+        min-height: 34px;
+        padding: 0 12px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.9824);
+        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.218);
+    }
+
+    100% {
+        width: min(var(--liquid-reminder-collapsed-target-width), calc(100vw - 24px));
+        min-height: 34px;
+        padding: 0 12px;
+        border-radius: 999px;
+        transform: translateX(-50%) scale(0.982);
+        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
+        filter: blur(0) saturate(1) brightness(1);
+    }
+}
+
+@keyframes liquid-island-mobile-body-collapse {
+    0% {
+        min-height: 102px;
+        gap: 18px;
+        justify-content: flex-start;
+    }
+
+    18% {
+        min-height: 84px;
+        gap: 14px;
+        justify-content: flex-start;
+    }
+
+    36% {
+        min-height: 54px;
+        gap: 10px;
+        justify-content: flex-start;
+    }
+
+    68% {
+        min-height: 40px;
+        gap: 4px;
+        justify-content: center;
+    }
+
+    100% {
+        min-height: 34px;
+        gap: 0;
+        justify-content: center;
+    }
+}
+
+@keyframes liquid-island-mobile-copy-collapse {
+    0% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+
+    26% {
+        opacity: 1;
+        transform: translateY(0) scale(0.996);
+        filter: blur(0);
+    }
+
+    58% {
+        opacity: 1;
+        transform: translateY(0) scale(0.99);
+        filter: blur(0);
+    }
+
+    84% {
+        opacity: 1;
+        transform: translateY(0) scale(0.996);
+        filter: blur(0);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+}
+
+@keyframes liquid-island-mobile-fade-collapse {
+    0% {
+        opacity: 1;
+        max-height: 120px;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+    }
+
+    36% {
+        opacity: 0.64;
+        max-height: 72px;
+        transform: translateY(-2px) scale(0.98);
+        filter: blur(2px);
+    }
+
+    68% {
+        opacity: 0.22;
+        max-height: 18px;
+        transform: translateY(-4px) scale(0.96);
+        filter: blur(5px);
+    }
+
+    100% {
+        opacity: 0;
+        max-height: 0;
+        transform: translateY(-6px) scale(0.94);
+        filter: blur(8px);
+    }
+}
+
+@keyframes liquid-island-mobile-title-collapse {
+    0% {
+        margin-bottom: 8px;
+        font-size: 18px;
+    }
+
+    24% {
+        margin-bottom: 3px;
+        font-size: 16px;
+    }
+
+    58% {
+        margin-bottom: 0;
+        font-size: 14px;
+    }
+
+    84% {
+        margin-bottom: 0;
+        font-size: 13.5px;
+    }
+
+    100% {
+        margin-bottom: 0;
+        font-size: 13px;
+    }
+}
+
+@keyframes liquid-island-mobile-glow-collapse {
+    0% {
+        opacity: 0.08;
+    }
+
+    100% {
+        opacity: 0;
     }
 }
 
@@ -715,10 +1033,6 @@
     transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease, border-color 180ms ease;
 }
 
-.liquid-reminder-mobile-settings {
-    display: none;
-}
-
 .liquid-reminder-settings-button:hover {
     transform: translateY(-1px);
     background: rgba(24, 24, 30, 0.92);
@@ -873,14 +1187,12 @@
 @media (max-width: 720px) {
     .liquid-reminder-island {
         width: min(100vw - 10px, 560px);
-        min-height: 120px;
+        min-height: 128px;
         padding: 12px 12px 10px;
         border-radius: 24px;
     }
 
     .liquid-reminder-body {
-        flex-direction: column;
-        align-items: stretch;
         min-height: 0;
         gap: 12px;
     }
@@ -893,10 +1205,6 @@
 
     .liquid-reminder-actions {
         justify-content: flex-start;
-    }
-
-    .liquid-reminder-mobile-settings {
-        display: inline-flex;
     }
 
     .liquid-reminder-title {
@@ -918,10 +1226,6 @@
         min-height: 32px;
     }
 
-    .liquid-reminder-settings-button {
-        display: none;
-    }
-
     .liquid-reminder-settings-panel {
         right: 10px;
         bottom: 50px;
@@ -931,10 +1235,21 @@
         border-radius: 22px;
     }
 
-    .liquid-reminder-island.liquid-reminder-mobile-collapsed {
-        width: min(160px, calc(100vw - 20px));
+    .liquid-reminder-island.liquid-reminder-collapsed {
+        width: min(var(--liquid-reminder-collapsed-target-width), calc(100vw - 20px));
         min-height: 32px;
         padding: 0 10px;
+        transform: translateX(-50%) scale(0.982);
+    }
+
+    .liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-body {
+        min-height: 32px;
+    }
+
+    .liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-message,
+    .liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-meta,
+    .liquid-reminder-island.liquid-reminder-collapsed .liquid-reminder-actions {
+        transform: translateY(-4px) scale(0.95);
     }
 }
 
