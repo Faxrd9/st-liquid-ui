@@ -76,6 +76,40 @@
     animation: liquid-island-collapse 260ms linear forwards;
 }
 
+.liquid-reminder-island.liquid-reminder-mobile-collapsed {
+    width: min(168px, calc(100vw - 24px));
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    opacity: 0.96;
+    overflow: hidden;
+}
+
+.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-body {
+    min-height: 34px;
+    align-items: center;
+}
+
+.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-copy {
+    opacity: 1;
+    transform: none;
+    filter: none;
+}
+
+.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-message,
+.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-meta,
+.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-actions {
+    display: none;
+}
+
+.liquid-reminder-island.liquid-reminder-mobile-collapsed .liquid-reminder-title {
+    margin: 0;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .liquid-reminder-body {
     position: relative;
     z-index: 1;
@@ -664,6 +698,177 @@
     }
 }
 
+.liquid-reminder-settings-button {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 2147482490;
+    min-height: 34px;
+    padding: 0 14px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(12, 12, 15, 0.82);
+    color: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease, border-color 180ms ease;
+}
+
+.liquid-reminder-mobile-settings {
+    display: none;
+}
+
+.liquid-reminder-settings-button:hover {
+    transform: translateY(-1px);
+    background: rgba(24, 24, 30, 0.92);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.liquid-reminder-settings-button:active {
+    transform: scale(0.98);
+}
+
+.liquid-reminder-settings-panel {
+    position: fixed;
+    right: 16px;
+    bottom: 58px;
+    z-index: 2147482491;
+    width: min(460px, calc(100vw - 24px));
+    max-height: min(78vh, 760px);
+    overflow: auto;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 28px;
+    background:
+        radial-gradient(circle at 50% -8%, rgba(255, 255, 255, 0.12), transparent 28%),
+        radial-gradient(circle at 84% 18%, rgba(91, 136, 255, 0.12), transparent 24%),
+        linear-gradient(180deg, rgba(20, 20, 26, 0.96), rgba(8, 8, 12, 0.96));
+    color: rgba(248, 248, 252, 0.96);
+    box-shadow: 0 28px 74px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(22px) saturate(160%);
+    -webkit-backdrop-filter: blur(22px) saturate(160%);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(10px) scale(0.98);
+    transition: opacity 180ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.liquid-reminder-settings-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    mask: linear-gradient(180deg, rgba(255, 255, 255, 0.95), transparent 44%);
+    pointer-events: none;
+}
+
+.liquid-reminder-settings-panel.liquid-reminder-settings-open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+}
+
+.liquid-reminder-settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.liquid-reminder-settings-header h3 {
+    margin: 0;
+    font-size: 17px;
+    line-height: 1.2;
+}
+
+.liquid-reminder-settings-close {
+    min-width: 32px;
+    min-height: 32px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.92);
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease, border-color 180ms ease;
+}
+
+.liquid-reminder-settings-close:hover,
+.liquid-reminder-setting-reset:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.liquid-reminder-settings-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.liquid-reminder-setting-field {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.liquid-reminder-setting-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.liquid-reminder-setting-field span {
+    font-size: 12px;
+    color: rgba(214, 214, 222, 0.78);
+}
+
+.liquid-reminder-setting-reset {
+    min-height: 24px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 11px;
+    white-space: nowrap;
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease, border-color 180ms ease;
+}
+
+.liquid-reminder-setting-field input[type="number"],
+.liquid-reminder-setting-field textarea {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(248, 248, 252, 0.96);
+    padding: 10px 12px;
+    box-sizing: border-box;
+}
+
+.liquid-reminder-setting-field textarea {
+    resize: vertical;
+    min-height: 76px;
+}
+
+.liquid-reminder-setting-field input[type="checkbox"] {
+    justify-self: start;
+    width: 18px;
+    height: 18px;
+}
+
+.liquid-reminder-settings-note {
+    margin-top: 12px;
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(214, 214, 222, 0.66);
+}
+
 
 @media (max-width: 720px) {
     .liquid-reminder-island {
@@ -690,6 +895,10 @@
         justify-content: flex-start;
     }
 
+    .liquid-reminder-mobile-settings {
+        display: inline-flex;
+    }
+
     .liquid-reminder-title {
         font-size: 16px;
     }
@@ -708,6 +917,25 @@
     .liquid-reminder-close {
         min-height: 32px;
     }
+
+    .liquid-reminder-settings-button {
+        display: none;
+    }
+
+    .liquid-reminder-settings-panel {
+        right: 10px;
+        bottom: 50px;
+        width: calc(100vw - 20px);
+        max-height: 72vh;
+        padding: 12px;
+        border-radius: 22px;
+    }
+
+    .liquid-reminder-island.liquid-reminder-mobile-collapsed {
+        width: min(160px, calc(100vw - 20px));
+        min-height: 32px;
+        padding: 0 10px;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -716,6 +944,8 @@
     .liquid-reminder-island.liquid-reminder-hiding,
     .liquid-reminder-copy,
     .liquid-reminder-actions,
+    .liquid-reminder-settings-button,
+    .liquid-reminder-settings-panel,
     .liquid-reminder-action,
     .liquid-reminder-close {
         animation: none !important;
