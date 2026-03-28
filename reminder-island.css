@@ -32,13 +32,13 @@
     box-shadow: 0 22px 56px rgba(0, 0, 0, 0.28);
     backdrop-filter: blur(14px) saturate(138%);
     -webkit-backdrop-filter: blur(14px) saturate(138%);
-    transform: translateX(-50%) scale(1);
+    transform: translateX(-50%) translateZ(0) scale(1);
     transform-origin: top center;
     opacity: 0;
     pointer-events: none;
     overflow: hidden;
     isolation: isolate;
-    filter: blur(4px) saturate(0.96) brightness(0.98);
+    filter: blur(3px) saturate(0.98) brightness(0.99);
     will-change: width, min-height, padding, border-radius, transform, opacity, filter;
     contain: layout paint style;
     transition:
@@ -173,10 +173,10 @@
     flex: 1;
     min-width: 0;
     color: var(--liquid-reminder-copy);
-    transform: translateY(6px) scale(0.8);
+    transform: translateY(4px) scale(0.88);
     transform-origin: center top;
     opacity: 0;
-    filter: blur(16px);
+    filter: blur(10px);
     will-change: transform, opacity, filter;
 }
 
@@ -222,10 +222,10 @@
     width: 100%;
     max-width: 100%;
     min-height: 36px;
-    transform: translateY(12px) scale(0.72);
+    transform: translateY(8px) scale(0.84);
     transform-origin: center top;
     opacity: 0;
-    filter: blur(18px);
+    filter: blur(10px);
     will-change: transform, opacity, filter;
 }
 
@@ -1016,72 +1016,26 @@
     }
 }
 
-.liquid-reminder-settings-button {
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    z-index: 2147482490;
-    min-height: 34px;
-    padding: 0 14px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 999px;
-    background: rgba(12, 12, 15, 0.82);
-    color: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
-    backdrop-filter: blur(18px) saturate(150%);
-    -webkit-backdrop-filter: blur(18px) saturate(150%);
-    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease, border-color 180ms ease;
+.liquid-reminder-settings-entry {
+    user-select: none;
 }
 
-.liquid-reminder-settings-button:hover {
-    transform: translateY(-1px);
-    background: rgba(24, 24, 30, 0.92);
-    border-color: rgba(255, 255, 255, 0.2);
+.liquid-reminder-settings-entry .inline-drawer-toggle {
+    cursor: pointer;
 }
 
-.liquid-reminder-settings-button:active {
-    transform: scale(0.98);
+.liquid-reminder-settings-entry .inline-drawer-toggle:focus-visible {
+    outline: 1px solid rgba(255, 255, 255, 0.24);
+    outline-offset: -1px;
 }
 
 .liquid-reminder-settings-panel {
-    position: fixed;
-    right: 16px;
-    bottom: 58px;
-    z-index: 2147482491;
-    width: min(460px, calc(100vw - 24px));
-    max-height: min(78vh, 760px);
-    overflow: auto;
-    padding: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 28px;
-    background:
-        radial-gradient(circle at 50% -8%, rgba(255, 255, 255, 0.12), transparent 28%),
-        radial-gradient(circle at 84% 18%, rgba(91, 136, 255, 0.12), transparent 24%),
-        linear-gradient(180deg, rgba(20, 20, 26, 0.96), rgba(8, 8, 12, 0.96));
-    color: rgba(248, 248, 252, 0.96);
-    box-shadow: 0 28px 74px rgba(0, 0, 0, 0.42);
-    backdrop-filter: blur(22px) saturate(160%);
-    -webkit-backdrop-filter: blur(22px) saturate(160%);
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(10px) scale(0.98);
-    transition: opacity 180ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.liquid-reminder-settings-panel::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    mask: linear-gradient(180deg, rgba(255, 255, 255, 0.95), transparent 44%);
-    pointer-events: none;
+    display: none;
+    padding-top: 10px;
 }
 
 .liquid-reminder-settings-panel.liquid-reminder-settings-open {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0) scale(1);
+    display: block;
 }
 
 .liquid-reminder-settings-header {

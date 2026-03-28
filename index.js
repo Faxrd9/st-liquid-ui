@@ -15,12 +15,18 @@ const ACTIVE_IDLE_TIMEOUT_MS = 60 * 1000;
 const REMINDER_TICK_MS = 1000;
 const REMINDER_AUTO_HIDE_MS = 18000;
 const DEFAULT_REMINDER_SNOOZE_MS = 5 * MINUTE_MS;
+const MIN_REMINDER_INTERVAL_MINUTES = 1;
+const MAX_REMINDER_INTERVAL_MINUTES = 180;
+const DEFAULT_EYE_CARE_INTERVAL_MINUTES = DEFAULT_EYE_CARE_INTERVAL_MS / MINUTE_MS;
+const DEFAULT_POSTURE_INTERVAL_MINUTES = DEFAULT_POSTURE_INTERVAL_MS / MINUTE_MS;
 const WEATHER_CACHE_MS = 90 * MINUTE_MS;
 const HOLIDAY_API_TIMEOUT_MS = 8000;
 const WELCOME_CHECK_INTERVAL_MS = 500;
 const WELCOME_CHECK_TIMEOUT_MS = 12000;
 const DISABLED_DAY_STORAGE_KEY = 'st-liquid-ui-reminder-disabled-day-v4';
 const REMINDER_SNOOZE_STORAGE_KEY = 'st-liquid-ui-reminder-snooze-until-v2';
+const EYE_REMINDER_INTERVAL_STORAGE_KEY = 'st-liquid-ui-eye-reminder-interval-minutes-v1';
+const POSTURE_REMINDER_INTERVAL_STORAGE_KEY = 'st-liquid-ui-posture-reminder-interval-minutes-v1';
 const REMINDER_STORAGE_KEYS = [
     'st-liquid-ui-reminder-disabled-day',
     'st-liquid-ui-reminder-disabled-day-v2',
@@ -28,6 +34,9 @@ const REMINDER_STORAGE_KEYS = [
     'st-liquid-ui-reminder-snooze-until',
     'st-liquid-ui-reminder-snooze-until-v2',
     'st-liquid-ui-reminder-disabled-day-v4',
+    'st-liquid-ui-reminder-lead-time-minutes-v1',
+    'st-liquid-ui-eye-reminder-interval-minutes-v1',
+    'st-liquid-ui-posture-reminder-interval-minutes-v1',
 ];
 
 const SOLAR_HOLIDAY_GREETINGS = new Map([
@@ -60,6 +69,13 @@ let reminderIsland = null;
 let reminderTitle = null;
 let reminderMessage = null;
 let reminderMeta = null;
+let reminderSettingsEntry = null;
+let reminderSettingsPanel = null;
+let reminderSettingsContainer = null;
+let eyeReminderIntervalInput = null;
+let postureReminderIntervalInput = null;
+let eyeReminderIntervalMinutes = readReminderIntervalMinutes(EYE_REMINDER_INTERVAL_STORAGE_KEY, DEFAULT_EYE_CARE_INTERVAL_MINUTES);
+let postureReminderIntervalMinutes = readReminderIntervalMinutes(POSTURE_REMINDER_INTERVAL_STORAGE_KEY, DEFAULT_POSTURE_INTERVAL_MINUTES);
 let reminderTimerId = 0;
 let reminderHideTimer = 0;
 let activeUsageMs = 0;
@@ -67,8 +83,8 @@ let dailyUsageMs = 0;
 let usageDayStamp = new Date().toDateString();
 let lastTickAt = Date.now();
 let lastActivityAt = Date.now();
-let nextEyeReminderAt = DEFAULT_EYE_CARE_INTERVAL_MS;
-let nextPostureReminderAt = DEFAULT_POSTURE_INTERVAL_MS;
+let nextEyeReminderAt = eyeReminderIntervalMinutes * MINUTE_MS;
+let nextPostureReminderAt = postureReminderIntervalMinutes * MINUTE_MS;
 let snoozeUntil = Number.parseInt(localStorage.getItem(REMINDER_SNOOZE_STORAGE_KEY) || '0', 10) || 0;
 let remindersDisabledForToday = localStorage.getItem(DISABLED_DAY_STORAGE_KEY) === usageDayStamp;
 let weatherPromise = null;
@@ -89,6 +105,137 @@ function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function clampReminderIntervalMinutes(value) {
+    return clamp(value, MIN_REMINDER_INTERVAL_MINUTES, MAX_REMINDER_INTERVAL_MINUTES);
+}
+
+function readReminderIntervalMinutes(storageKey, defaultValue) {
+    const storedValue = Number.parseInt(localStorage.getItem(storageKey) || '', 10);
+    if (!Number.isFinite(storedValue)) {
+        return defaultValue;
+    }
+
+    return clampReminderIntervalMinutes(storedValue);
+}
+
+function persistReminderIntervalMinutes(storageKey, value) {
+    const nextValue = clampReminderIntervalMinutes(value);
+
+    try {
+        localStorage.setItem(storageKey, String(nextValue));
+    } catch {
+        // Ignore storage write failures.
+    }
+
+    if (storageKey === EYE_REMINDER_INTERVAL_STORAGE_KEY) {
+        eyeReminderIntervalMinutes = nextValue;
+    }
+
+    if (storageKey === POSTURE_REMINDER_INTERVAL_STORAGE_KEY) {
+        postureReminderIntervalMinutes = nextValue;
+    }
+
+    return nextValue;
+}
+
+function getEyeReminderIntervalMs() {
+    return eyeReminderIntervalMinutes * MINUTE_MS;
+}
+
+function getPostureReminderIntervalMs() {
+    return postureReminderIntervalMinutes * MINUTE_MS;
+}
+
+function syncReminderThreshold(targetThreshold, previousIntervalMs, nextIntervalMs) {
+    if (activeUsageMs >= targetThreshold) {
+        return targetThreshold;
+    }
+
+    return Math.max(nextIntervalMs, targetThreshold - previousIntervalMs + nextIntervalMs);
+}
+
+function applyReminderIntervalSettings() {
+    const previousEyeIntervalMs = getEyeReminderIntervalMs();
+    const previousPostureIntervalMs = getPostureReminderIntervalMs();
+    const nextEyeValue = eyeReminderIntervalInput instanceof HTMLInputElement
+        ? persistReminderIntervalMinutes(EYE_REMINDER_INTERVAL_STORAGE_KEY, Number.parseInt(eyeReminderIntervalInput.value || '', 10))
+        : eyeReminderIntervalMinutes;
+    const nextPostureValue = postureReminderIntervalInput instanceof HTMLInputElement
+        ? persistReminderIntervalMinutes(POSTURE_REMINDER_INTERVAL_STORAGE_KEY, Number.parseInt(postureReminderIntervalInput.value || '', 10))
+        : postureReminderIntervalMinutes;
+    const nextEyeIntervalMs = getEyeReminderIntervalMs();
+    const nextPostureIntervalMs = getPostureReminderIntervalMs();
+
+    if (eyeReminderIntervalInput instanceof HTMLInputElement) {
+        eyeReminderIntervalInput.value = String(nextEyeValue);
+    }
+
+    if (postureReminderIntervalInput instanceof HTMLInputElement) {
+        postureReminderIntervalInput.value = String(nextPostureValue);
+    }
+
+    nextEyeReminderAt = syncReminderThreshold(nextEyeReminderAt, previousEyeIntervalMs, nextEyeIntervalMs);
+    nextPostureReminderAt = syncReminderThreshold(nextPostureReminderAt, previousPostureIntervalMs, nextPostureIntervalMs);
+    advanceReminderThresholds(activeUsageMs);
+}
+
+function resetReminderIntervalSettings() {
+    persistReminderIntervalMinutes(EYE_REMINDER_INTERVAL_STORAGE_KEY, DEFAULT_EYE_CARE_INTERVAL_MINUTES);
+    persistReminderIntervalMinutes(POSTURE_REMINDER_INTERVAL_STORAGE_KEY, DEFAULT_POSTURE_INTERVAL_MINUTES);
+
+    if (eyeReminderIntervalInput instanceof HTMLInputElement) {
+        eyeReminderIntervalInput.value = String(eyeReminderIntervalMinutes);
+    }
+
+    if (postureReminderIntervalInput instanceof HTMLInputElement) {
+        postureReminderIntervalInput.value = String(postureReminderIntervalMinutes);
+    }
+
+    nextEyeReminderAt = getEyeReminderIntervalMs();
+    nextPostureReminderAt = getPostureReminderIntervalMs();
+    advanceReminderThresholds(activeUsageMs);
+}
+
+function updateReminderSettingsInputs() {
+    if (eyeReminderIntervalInput instanceof HTMLInputElement) {
+        eyeReminderIntervalInput.value = String(eyeReminderIntervalMinutes);
+    }
+
+    if (postureReminderIntervalInput instanceof HTMLInputElement) {
+        postureReminderIntervalInput.value = String(postureReminderIntervalMinutes);
+    }
+}
+
+function ensureReminderSettingsEntry() {
+    if (reminderSettingsEntry instanceof HTMLElement && reminderSettingsEntry.isConnected) {
+        return reminderSettingsEntry;
+    }
+
+    const settingsColumn = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
+    if (!(settingsColumn instanceof HTMLElement)) {
+        return null;
+    }
+
+    const container = document.createElement('div');
+    container.id = 'liquid_reminder_container';
+    container.className = 'extension_container';
+
+    const entry = document.createElement('div');
+    entry.className = 'inline-drawer liquid-reminder-settings-entry';
+    entry.innerHTML = `
+        <div class="inline-drawer-toggle inline-drawer-header" tabindex="0" role="button" aria-expanded="false" aria-controls="liquid_reminder_settings_panel">
+            <b>Liquid 提醒</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
+        </div>
+    `;
+
+    container.appendChild(entry);
+    settingsColumn.appendChild(container);
+    reminderSettingsContainer = container;
+    reminderSettingsEntry = entry;
+    return entry;
+}
+
 function clearReminderHideTimer() {
     if (reminderHideTimer) {
         window.clearTimeout(reminderHideTimer);
@@ -99,7 +246,12 @@ function clearReminderHideTimer() {
 function cleanupReminderStorage() {
     try {
         REMINDER_STORAGE_KEYS.forEach(key => {
-            if (key !== DISABLED_DAY_STORAGE_KEY && key !== REMINDER_SNOOZE_STORAGE_KEY) {
+            if (
+                key !== DISABLED_DAY_STORAGE_KEY
+                && key !== REMINDER_SNOOZE_STORAGE_KEY
+                && key !== EYE_REMINDER_INTERVAL_STORAGE_KEY
+                && key !== POSTURE_REMINDER_INTERVAL_STORAGE_KEY
+            ) {
                 localStorage.removeItem(key);
             }
         });
@@ -393,13 +545,15 @@ function getWeatherMessage(weather) {
 
 function getReminderPayload(type, weather) {
     const duration = formatDuration(activeUsageMs);
+    const eyeIntervalLabel = `${eyeReminderIntervalMinutes} 分钟`;
+    const postureIntervalLabel = `${postureReminderIntervalMinutes} 分钟`;
 
     if (type === 'combined') {
         return {
             mode: 'combined',
             title: '休息一下',
             message: `${getWeatherMessage(weather)} 也别忘了做一次 20-20-20 护眼：看向 20 英尺外 20 秒。`,
-            meta: `已连续活跃 ${duration} · 今日累计 ${formatDuration(dailyUsageMs)}`,
+            meta: `护眼 ${eyeIntervalLabel} · 久坐 ${postureIntervalLabel} · 已连续活跃 ${duration} · 今日累计 ${formatDuration(dailyUsageMs)}`,
         };
     }
 
@@ -408,7 +562,7 @@ function getReminderPayload(type, weather) {
             mode: 'eye',
             title: '20-20-20 护眼提醒',
             message: `你已经连续看屏幕 ${duration} 了，今天累计使用 ${formatDuration(dailyUsageMs)}，看看 20 英尺外至少 20 秒，让眼睛放松一下。`,
-            meta: `每 20 分钟循环提醒 · 今日累计 ${formatDuration(dailyUsageMs)}`,
+            meta: `每 ${eyeIntervalLabel} 提醒 · 今日累计 ${formatDuration(dailyUsageMs)}`,
         };
     }
 
@@ -416,7 +570,7 @@ function getReminderPayload(type, weather) {
         mode: 'posture',
         title: '起身走走',
         message: getWeatherMessage(weather),
-        meta: `已连续活跃 ${duration} · 今日累计 ${formatDuration(dailyUsageMs)}`,
+        meta: `每 ${postureIntervalLabel} 提醒 · 已连续活跃 ${duration} · 今日累计 ${formatDuration(dailyUsageMs)}`,
     };
 }
 
@@ -434,19 +588,132 @@ function hideReminderIsland(immediate = false) {
     }
 }
 
+function toggleReminderSettings(open) {
+    if (!(reminderSettingsPanel instanceof HTMLElement)) {
+        return;
+    }
+
+    const settingsEntry = ensureReminderSettingsEntry();
+    const header = settingsEntry?.querySelector('.inline-drawer-toggle');
+    const icon = settingsEntry?.querySelector('.inline-drawer-icon');
+    reminderSettingsPanel.classList.toggle('liquid-reminder-settings-open', open);
+    header?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    icon?.classList.toggle('down', open);
+    icon?.classList.toggle('up', !open);
+
+    if (open) {
+        updateReminderSettingsInputs();
+        if (eyeReminderIntervalInput instanceof HTMLInputElement) {
+            eyeReminderIntervalInput.focus();
+            eyeReminderIntervalInput.select();
+        }
+    }
+}
+
+function createReminderSettings() {
+    const settingsEntry = ensureReminderSettingsEntry();
+    if (!(settingsEntry instanceof HTMLElement)) {
+        return;
+    }
+
+    if (reminderSettingsPanel instanceof HTMLElement && reminderSettingsPanel.isConnected) {
+        return;
+    }
+
+    const settingsPanel = document.createElement('div');
+    settingsPanel.id = 'liquid_reminder_settings_panel';
+    settingsPanel.className = 'liquid-reminder-settings-panel inline-drawer-content';
+    settingsPanel.innerHTML = `
+        <div class="liquid-reminder-settings-grid">
+            <label class="liquid-reminder-setting-field">
+                <div class="liquid-reminder-setting-label-row">
+                    <strong>护眼提醒</strong>
+                </div>
+                <span>连续看屏幕多久后提醒一次，单位为分钟。</span>
+                <input type="number" class="text_pole" min="1" max="180" step="1" value="${eyeReminderIntervalMinutes}" data-setting="eye-reminder-interval" />
+            </label>
+            <label class="liquid-reminder-setting-field">
+                <div class="liquid-reminder-setting-label-row">
+                    <strong>久坐提醒</strong>
+                    <button type="button" class="menu_button liquid-reminder-setting-reset" data-action="reset">恢复默认</button>
+                </div>
+                <span>连续久坐多久后提醒一次，单位为分钟。</span>
+                <input type="number" class="text_pole" min="1" max="180" step="1" value="${postureReminderIntervalMinutes}" data-setting="posture-reminder-interval" />
+            </label>
+        </div>
+        <div class="liquid-reminder-settings-note">默认分别为 20 分钟和 30 分钟。修改后会立即用于后续提醒判定，重合时会自动合并触发。</div>
+    `;
+
+    const header = settingsEntry.querySelector('.inline-drawer-toggle');
+    header?.addEventListener('click', () => {
+        const isOpen = settingsPanel.classList.contains('liquid-reminder-settings-open');
+        toggleReminderSettings(!isOpen);
+    });
+    header?.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+        }
+
+        event.preventDefault();
+        const isOpen = settingsPanel.classList.contains('liquid-reminder-settings-open');
+        toggleReminderSettings(!isOpen);
+    });
+
+    settingsPanel.addEventListener('click', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+
+        const action = target.closest('[data-action]')?.getAttribute('data-action');
+        if (action === 'reset') {
+            resetReminderIntervalSettings();
+        }
+    });
+
+    const eyeInput = settingsPanel.querySelector('[data-setting="eye-reminder-interval"]');
+    if (eyeInput instanceof HTMLInputElement) {
+        eyeInput.addEventListener('change', applyReminderIntervalSettings);
+        eyeInput.addEventListener('blur', applyReminderIntervalSettings);
+    }
+
+    const postureInput = settingsPanel.querySelector('[data-setting="posture-reminder-interval"]');
+    if (postureInput instanceof HTMLInputElement) {
+        postureInput.addEventListener('change', applyReminderIntervalSettings);
+        postureInput.addEventListener('blur', applyReminderIntervalSettings);
+    }
+
+    settingsEntry.appendChild(settingsPanel);
+    reminderSettingsPanel = settingsPanel;
+    eyeReminderIntervalInput = eyeInput instanceof HTMLInputElement ? eyeInput : null;
+    postureReminderIntervalInput = postureInput instanceof HTMLInputElement ? postureInput : null;
+}
+
 function showReminderIsland(payload) {
     if (!(reminderIsland instanceof HTMLElement) || !(reminderTitle instanceof HTMLElement) || !(reminderMessage instanceof HTMLElement) || !(reminderMeta instanceof HTMLElement)) {
         return;
     }
 
+    const mode = payload.mode || 'default';
+    const titleChanged = reminderTitle.textContent !== payload.title;
+    const messageChanged = reminderMessage.textContent !== payload.message;
+    const metaChanged = reminderMeta.textContent !== payload.meta;
+    const modeChanged = reminderIsland.dataset.mode !== mode;
+    const needsRestart = !reminderIsland.classList.contains('liquid-reminder-visible') || reminderIsland.classList.contains('liquid-reminder-hiding');
+
     reminderTitle.textContent = payload.title;
     reminderMessage.textContent = payload.message;
     reminderMeta.textContent = payload.meta;
-    reminderIsland.dataset.mode = payload.mode || 'default';
-    reminderIsland.classList.remove('liquid-reminder-hiding');
-    reminderIsland.classList.remove('liquid-reminder-visible');
-    void reminderIsland.offsetWidth;
-    reminderIsland.classList.add('liquid-reminder-visible');
+    reminderIsland.dataset.mode = mode;
+
+    if (needsRestart) {
+        reminderIsland.classList.remove('liquid-reminder-hiding');
+        reminderIsland.classList.remove('liquid-reminder-visible');
+        void reminderIsland.offsetWidth;
+        reminderIsland.classList.add('liquid-reminder-visible');
+    } else if (titleChanged || messageChanged || metaChanged || modeChanged) {
+        reminderIsland.classList.remove('liquid-reminder-hiding');
+    }
 
     clearReminderHideTimer();
     reminderHideTimer = window.setTimeout(() => {
@@ -458,6 +725,8 @@ function createReminderIsland() {
     if (reminderIsland instanceof HTMLElement) {
         return reminderIsland;
     }
+
+    createReminderSettings();
 
     const island = document.createElement('section');
     island.className = 'liquid-reminder-island';
@@ -656,12 +925,15 @@ function scheduleWelcomeIslandCheck() {
 }
 
 function advanceReminderThresholds(nowMs) {
+    const eyeIntervalMs = getEyeReminderIntervalMs();
+    const postureIntervalMs = getPostureReminderIntervalMs();
+
     while (nextEyeReminderAt <= nowMs) {
-        nextEyeReminderAt += DEFAULT_EYE_CARE_INTERVAL_MS;
+        nextEyeReminderAt += eyeIntervalMs;
     }
 
     while (nextPostureReminderAt <= nowMs) {
-        nextPostureReminderAt += DEFAULT_POSTURE_INTERVAL_MS;
+        nextPostureReminderAt += postureIntervalMs;
     }
 }
 
@@ -709,6 +981,10 @@ async function reminderTick() {
 
 function installReminderIsland() {
     cleanupReminderStorage();
+    eyeReminderIntervalMinutes = readReminderIntervalMinutes(EYE_REMINDER_INTERVAL_STORAGE_KEY, DEFAULT_EYE_CARE_INTERVAL_MINUTES);
+    postureReminderIntervalMinutes = readReminderIntervalMinutes(POSTURE_REMINDER_INTERVAL_STORAGE_KEY, DEFAULT_POSTURE_INTERVAL_MINUTES);
+    nextEyeReminderAt = getEyeReminderIntervalMs();
+    nextPostureReminderAt = getPostureReminderIntervalMs();
     createReminderIsland();
     markUserActivity();
 
